@@ -1,28 +1,45 @@
 @echo off
-chcp 65001 >nul
+setlocal
 cd /d "%~dp0"
 
-where python >nul 2>nul
-if errorlevel 1 (
+set "PY="
+
+py -3 -c "import streamlit" >nul 2>nul
+if not errorlevel 1 set "PY=py -3"
+
+if not defined PY (
+  python -c "import streamlit" >nul 2>nul
+  if not errorlevel 1 set "PY=python"
+)
+
+if not defined PY (
   echo.
-  echo æ‰¾ä¸åˆ° python å‘½ä»¤ã€‚
-  echo è¯·å…ˆè£… Pythonï¼Œæˆ–è€…åœ¨ç³»ç»Ÿè®¾ç½®é‡ŒæŠŠ Python åŠ è¿› PATHã€‚
+  echo µ±Ç° Python Ã»ÓĞ°²×° streamlit£¬ÕıÔÚ°²×°ÒÀÀµ£¬µÚÒ»´Î»áÂıÒ»µã...
+  py -3 -m pip install -r requirements.txt
+  if not errorlevel 1 set "PY=py -3"
+)
+
+if not defined PY (
+  echo.
+  echo »¹ÊÇ²»ĞĞ£¬ÇëÊÖ¶¯Ö´ĞĞ£º
+  echo     py -3 -m pip install -r requirements.txt
   echo.
   pause
   exit /b 1
 )
 
+echo Ê¹ÓÃ½âÊÍÆ÷: %PY%
+
 if not exist "data\shop.db" (
-  echo æ•°æ®åº“ä¸å­˜åœ¨ï¼Œæ­£åœ¨é‡å»º...
-  python scripts\build_db.py
+  echo Êı¾İ¿â²»´æÔÚ£¬ÕıÔÚÖØ½¨...
+  %PY% scripts\build_db.py
 )
 
 echo.
-echo å¯åŠ¨ä¸­ï¼Œæµè§ˆå™¨ä¼šè‡ªåŠ¨æ‰“å¼€ http://localhost:8501
-echo è´¦å· boss / 123456ï¼ˆåº—ä¸»ï¼‰ã€€clerk / 123456ï¼ˆåº—å‘˜ï¼‰
-echo å…³æ‰è¿™ä¸ªçª—å£å°±åœæ­¢æœåŠ¡ã€‚
+echo Æô¶¯ÖĞ£¬·şÎñ¾ÍĞ÷ºóä¯ÀÀÆ÷»á×Ô¶¯´ò¿ª http://localhost:8501
+echo µêÖ÷ boss / 123456      µêÔ± clerk / 123456
+echo ¹ØµôÕâ¸ö´°¿Ú¾ÍÍ£Ö¹·şÎñ¡£
 echo.
 
-start "" http://localhost:8501
-python -m streamlit run app.py --server.port 8501 --server.headless true
+%PY% -m streamlit run app.py --server.port 8501 --server.headless false
 pause
