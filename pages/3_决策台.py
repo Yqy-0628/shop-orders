@@ -95,7 +95,7 @@ with right:
         st.markdown(
             f"""
 那天卖了 **{r['sold_before']:.0f}** 件，但还有 **{r['gap']:.0f}** 件的需求没被满足。
-多订 **{extra}** 件 → 能多卖 **{r['recovered']:.0f}** 件，挽回 **{ui.money(r['recovered'] * r['margin'])}**。
+多订 **{extra}** 件 → 能多卖 **{r['recovered_qty']:.0f}** 件，挽回 **{ui.money(r['recovered_value'])}**。
 """
         )
         st.metric("当天损失", ui.money(r["lost_before"]),

@@ -22,8 +22,9 @@ data = [{"品类": r["category"], "平均实际订货": round(r["actual"], 1),
          "建议订货": round(r["suggest"], 1), "偏差": f"{r['gap']*100:+.0f}%"} for r in rows]
 st.dataframe(data, width="stretch", hide_index=True)
 
-chart = [{"品类": r["category"], "实际": r["actual"], "建议": r["suggest"]} for r in rows]
-st.bar_chart(chart, x="品类", y=["实际", "建议"], height=320)
+chart = [{"品类": r["category"], "偏差(%)": round(r["gap"] * 100, 1)} for r in rows]
+st.bar_chart(chart, x="品类", y="偏差(%)", height=320)
+st.caption("0 以上＝常年多订，0 以下＝常年少订")
 
 worst = min(rows, key=lambda r: r["gap"])
 best = max(rows, key=lambda r: r["gap"])

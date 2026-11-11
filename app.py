@@ -17,7 +17,7 @@ c1, c2, c3, c4 = st.columns(4)
 c1.metric("缺货率", ui.pct(k["stockout_rate"]), help="售罄时长 / 营业时长")
 c2.metric("报损率", ui.pct(k["spoilage_rate"]), help="报废件数 / 进货件数")
 c3.metric("缺货损失（易损品）", ui.money(k["stockout_loss"]))
-c4.metric("缺货 / 报损", f"{k['ratio']:.1f} 倍")
+c4.metric("缺货 / 报损", f"{k['ratio']:.2f} 倍")
 
 st.divider()
 

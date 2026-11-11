@@ -30,17 +30,24 @@ def stock_rows(conn, day):
 
 
 def ensure_today(conn, day=DEMO_TODAY):
-    """第一次打开时给“今天”生成一张进货单（按上周同星期销量 × 1.08）。"""
-    n = conn.execute("SELECT COUNT(*) FROM stock_move WHERE day=?", (day,)).fetchone()[0]
-    if n:
-        return False
-    wd = dt.date.fromisoformat(day).weekday()
+    """第一次打开时给“今天”生成一张进货单（按上周同星期销量 × 1.08）。
+
+    逐个 SKU 判断，已经有的就不再补——否则反复启动会把库存越堆越多。
+    """
+    have = {r[0] for r in conn.execute(
+        "SELECT DISTINCT sku_id FROM stock_move WHERE day=?", (day,))}
+    # 上周同一天，不是“历史上所有星期二”——后者会把 12 周的销量加在一起
+    prev = (dt.date.fromisoformat(day) - dt.timedelta(days=7)).isoformat()
     rows = conn.execute(
-        """SELECT sku_id, COALESCE(SUM(qty),0) q FROM sales
-           WHERE weekday=? AND day < ? GROUP BY sku_id""",
-        (wd, day),
+        "SELECT sku_id, SUM(qty) q FROM sales WHERE day=? GROUP BY sku_id", (prev,)
     ).fetchall()
+    if not rows:
+        rows = conn.execute(
+            """SELECT sku_id, ROUND(mu * 1.0) q FROM sku""").fetchall()
+    added = 0
     for r in rows:
+        if r["sku_id"] in have:
+            continue
         qty = max(1, int(round(r["q"] * 1.08)))
         cost = conn.execute("SELECT cost FROM sku WHERE sku_id=?", (r["sku_id"],)).fetchone()[0]
         conn.execute(
@@ -48,8 +55,9 @@ def ensure_today(conn, day=DEMO_TODAY):
             "VALUES (?,?,'入库',?,?,'已到货')",
             (r["sku_id"], day, qty, cost),
         )
+        added += 1
     conn.commit()
-    return True
+    return added > 0
 
 
 def kpi(conn):
