@@ -13,9 +13,9 @@ from __future__ import annotations
 
 from datetime import date as _date, datetime, timedelta
 
-from . import connect
+from . import connect, pipeline
 
-DEMO_TODAY = "2026-11-15"
+DEMO_TODAY = "2026-11-09"
 
 
 def _today(d=None) -> str:
@@ -93,23 +93,20 @@ def predict(sku_id: str, day: str | None = None) -> dict:
     """
     day = _today(day)
     conn = connect()
-    s = conn.execute("SELECT * FROM sku WHERE sku_id=?", (sku_id,)).fetchone()
+    s = conn.execute("SELECT sku_id, name FROM sku WHERE sku_id=?", (sku_id,)).fetchone()
     if s is None:
         raise KeyError(f"没有这个商品: {sku_id}")
-    value = round(float(s["mu"]))
+
+    wd = datetime.strptime(day, "%Y-%m-%d").weekday()
+    r = pipeline.predict_sku(sku_id, wd, conn)
+    if r is None:
+        raise ValueError(f"{sku_id} 没有销售记录，无法预测")
+
     return {
         "sku_id": sku_id, "name": s["name"], "day": day,
-        "value": value,
-        "lo": max(1, round(value * 0.72)),
-        "hi": round(value * 1.18),
-        "level": 0.90,
-        "explain": [
-            {"label": "基准", "value": round(float(s["mu"]))},
-            {"label": "星期", "value": "×1.28"},
-            {"label": "趋势", "value": "×1.02"},
-            {"label": "特殊日", "value": "无"},
-        ],
-        "confidence": "normal",
+        "value": r["value"], "lo": r["lo"], "hi": r["hi"],
+        "level": r["level"], "explain": r["explain"],
+        "confidence": r["confidence"],
     }
 
 
@@ -120,20 +117,14 @@ def suggest(sku_id: str, day: str | None = None) -> dict:
     返回 {"sku_id", "day", "tiers": [{"key","name","qty","waste","stockout"}],
           "recommend": "normal"}
     """
-    p = predict(sku_id, day)
-    v = p["value"]
-    return {
-        "sku_id": sku_id, "day": p["day"],
-        "tiers": [
-            {"key": "save",   "name": "省着订", "qty": round(v * 0.90),
-             "waste": 1, "stockout": 0.35},
-            {"key": "normal", "name": "稳妥订", "qty": round(v * 1.03),
-             "waste": 3, "stockout": 0.12},
-            {"key": "safe",   "name": "保险订", "qty": round(v * 1.15),
-             "waste": 6, "stockout": 0.04},
-        ],
-        "recommend": "normal",
-    }
+    day = _today(day)
+    wd = datetime.strptime(day, "%Y-%m-%d").weekday()
+    conn = connect()
+    r = pipeline.suggest_sku(sku_id, wd, conn)
+    if r is None:
+        raise ValueError(f"{sku_id} 没有销售记录，无法给建议")
+    return {"sku_id": sku_id, "day": day,
+            "tiers": r["tiers"], "recommend": r["recommend"]}
 
 
 # ---------------------------------------------------------------- 记录
