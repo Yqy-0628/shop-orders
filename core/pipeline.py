@@ -107,17 +107,23 @@ def forecast(df: pd.DataFrame, weekday: int, k: int = 8) -> dict:
 
 
 def tiers(df: pd.DataFrame, weekday: int) -> list[dict]:
-    """三档建议：用历史样本回放算断货概率和预计报废。"""
-    pred = forecast(df, weekday)
-    samples = df["demand"].tail(56).values
+    """三档建议：围着预测值上下浮动，代价用历史样本实测（不假设分布）。
+
+    省着订 = 预测 × 0.90，稳妥 = × 1.05，保险 = × 1.20。
+    浮动倍数只是「档位的说法」，断货概率和报废量是从历史样本里数出来的。
+    """
+    base = forecast(df, weekday)["value"]
+    samples = df[df["weekday"] == weekday]["demand"].values
+    if len(samples) < 8:
+        samples = df["demand"].tail(56).values
     if len(samples) < 10:
         samples = df["demand"].values
-    qs = np.quantile(samples, [0.55, 0.80, 0.92])
 
     out = []
-    for key, name, q in zip(("save", "normal", "safe"),
-                            ("省着订", "稳妥订", "保险订"), qs):
-        Q = max(1, round(float(q)))
+    for key, name, mult in (("save", "少订一成", 0.90),
+                            ("normal", "按预测订", 1.00),
+                            ("safe", "多订两成", 1.25)):
+        Q = max(1, round(base * mult))
         out.append({
             "key": key, "name": name, "qty": Q,
             "stockout": round(float((samples > Q).mean()), 2),

@@ -112,6 +112,11 @@ def record_arrival(sku_id: str, qty: int, day: str | None = None) -> dict:
     return {"ok": True, "sku_id": sku_id, "day": _today(day), "qty": qty}
 
 
+def record_waste(sku_id: str, qty: int, day: str | None = None) -> dict:
+    """报损登记。qty 是报废件数（正数），内部存成负数。"""
+    return {"ok": True, "sku_id": sku_id, "day": _today(day), "qty": -abs(qty)}
+
+
 def record_soldout(sku_id: str, hour: int, day: str | None = None) -> dict:
     """卖光了，点一下。hour 用 24 小时制。"""
     return {"ok": True, "sku_id": sku_id, "day": _today(day), "hour": hour}
