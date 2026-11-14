@@ -13,7 +13,9 @@ from __future__ import annotations
 
 from datetime import date as _date, datetime, timedelta
 
-from . import connect, pipeline, rules
+import json
+
+from . import connect, pipeline, review, rules
 
 DEMO_TODAY = "2026-11-09"
 
@@ -100,41 +102,94 @@ def suggest(sku_id: str, day: str | None = None) -> dict:
 # ---------------------------------------------------------------- 记录
 def record_decision(sku_id: str, qty: int, reason: str | None = None,
                     day: str | None = None, user: str = "boss") -> dict:
-    """老板拍板。reason 是手改时的原因（天气/活动/经验/其他），没改可以留空。"""
+    """老板拍板。reason 是手改时的原因（天气/活动/经验/其他），没改可以留空。
+
+    落两处：decision_log 记「谁、建议多少、实际多少、为什么改」；
+    stock_move 记一张「在途」的入库单，第二天到货时转成已到货。
+    """
     day = _today(day)
+    conn = connect()
     ts = datetime.now().isoformat(timespec="seconds")
+    row = conn.execute("SELECT cost FROM sku WHERE sku_id=?", (sku_id,)).fetchone()
+    if row is None:
+        raise KeyError(f"没有这个商品: {sku_id}")
+
+    try:
+        suggested = predict(sku_id, day)["value"]
+    except Exception:
+        suggested = qty
+
+    # 同一天重复下单：覆盖上一条在途
+    conn.execute(
+        "DELETE FROM stock_move WHERE sku_id=? AND day=? AND status='在途'",
+        (sku_id, day))
+    conn.execute(
+        "INSERT INTO stock_move (sku_id, day, type, qty, unit_cost, status) "
+        "VALUES (?,?,'入库',?,?,'在途')",
+        (sku_id, day, qty, row["cost"]))
+    conn.execute(
+        "INSERT INTO decision_log (ts, username, sku_id, params_json, q_star, "
+        "adopted_qty, adopted) VALUES (?,?,?,?,?,?,?)",
+        (ts, user, sku_id,
+         json.dumps({"reason": reason or "", "target_day": day}, ensure_ascii=False),
+         suggested, qty, 0 if reason else 1))
+    conn.commit()
+
     return {"ok": True, "sku_id": sku_id, "day": day, "qty": qty,
-            "reason": reason or "", "ts": ts}
+            "reason": reason or "", "ts": ts, "suggested": suggested}
 
 
 def record_arrival(sku_id: str, qty: int, day: str | None = None) -> dict:
-    """到货登记。qty 是实收数量，跟订单不一致时由调用方传差异备注。"""
-    return {"ok": True, "sku_id": sku_id, "day": _today(day), "qty": qty}
+    """到货登记。把同一天的在途单转成已到货，数量以实收为准。"""
+    day = _today(day)
+    conn = connect()
+    row = conn.execute("SELECT cost FROM sku WHERE sku_id=?", (sku_id,)).fetchone()
+    if row is None:
+        raise KeyError(f"没有这个商品: {sku_id}")
+
+    conn.execute(
+        "DELETE FROM stock_move WHERE sku_id=? AND day=? AND status='在途'",
+        (sku_id, day))
+    conn.execute(
+        "INSERT INTO stock_move (sku_id, day, type, qty, unit_cost, status) "
+        "VALUES (?,?,'入库',?,?,'已到货')",
+        (sku_id, day, qty, row["cost"]))
+    conn.commit()
+    return {"ok": True, "sku_id": sku_id, "day": day, "qty": qty}
 
 
 def record_waste(sku_id: str, qty: int, day: str | None = None) -> dict:
-    """报损登记。qty 是报废件数（正数），内部存成负数。"""
-    return {"ok": True, "sku_id": sku_id, "day": _today(day), "qty": -abs(qty)}
+    """报损登记。qty 是报废件数（正数），存进库时转成负数。"""
+    day = _today(day)
+    conn = connect()
+    row = conn.execute("SELECT cost FROM sku WHERE sku_id=?", (sku_id,)).fetchone()
+    if row is None:
+        raise KeyError(f"没有这个商品: {sku_id}")
+
+    conn.execute(
+        "INSERT INTO stock_move (sku_id, day, type, qty, unit_cost, status) "
+        "VALUES (?,?,'报损',?,?,'已到货')",
+        (sku_id, day, -abs(qty), row["cost"]))
+    conn.commit()
+    return {"ok": True, "sku_id": sku_id, "day": day, "qty": -abs(qty)}
 
 
 def record_soldout(sku_id: str, hour: int, day: str | None = None) -> dict:
-    """卖光了，点一下。hour 用 24 小时制。"""
-    return {"ok": True, "sku_id": sku_id, "day": _today(day), "hour": hour}
+    """卖光了，点一下。hour 用 24 小时制。同一天重复点会覆盖。"""
+    day = _today(day)
+    conn = connect()
+    conn.execute("DELETE FROM stockout_mark WHERE sku_id=? AND day=?", (sku_id, day))
+    conn.execute(
+        "INSERT INTO stockout_mark (sku_id, day, start_hour, end_hour) VALUES (?,?,?,?)",
+        (sku_id, day, int(hour), 21))
+    conn.commit()
+    return {"ok": True, "sku_id": sku_id, "day": day, "hour": hour}
 
 
 # ---------------------------------------------------------------- 记分板
 def scoreboard(days: int = 30) -> dict:
-    """人和模型的对照。
-
-    返回 {"days", "follow": {"days", "waste"}, "ignore": {"days", "waste"}, "delta"}
-    delta 是「没听系统」比「听系统」每天多扔几个。
-    """
-    return {
-        "days": days,
-        "follow": {"days": 12, "waste": 2.1},
-        "ignore": {"days": 18, "waste": 5.4},
-        "delta": 3.3,
-    }
+    """反事实回放：同样的需求，按实际订货 vs 按建议订货，各亏多少钱。"""
+    return review.scoreboard(days)
 
 
 # ---------------------------------------------------------------- 复盘
@@ -143,17 +198,7 @@ def day_review(day: str | None = None) -> list[dict]:
 
     返回 [{"sku_id","name","predicted","actual","kind"}]  kind: model/data/human/none
     """
-    day = _today(day)
-    conn = connect()
-    out = []
-    for s in _skus(conn)[:4]:
-        out.append({
-            "sku_id": s["sku_id"], "name": s["name"],
-            "predicted": round(float(s["mu"])),
-            "actual": round(float(s["mu"]) * 1.12),
-            "kind": "model",
-        })
-    return out
+    return review.day_review(day)
 
 
 # ---------------------------------------------------------------- 自动下单

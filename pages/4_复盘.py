@@ -1,5 +1,5 @@
 # -*- coding: utf-8 -*-
-"""复盘：昨天错在哪，以及这一个月你和系统谁更准。"""
+"""复盘：昨天错在哪，以及过去一个月「听系统的」能省多少。"""
 import sys
 from pathlib import Path
 
@@ -11,38 +11,54 @@ import ui
 from core.api import day_review, scoreboard
 
 ui.page("复盘", "🔁")
-user = ui.guard()
+ui.guard()
 
 st.title("🔁 昨天错在哪")
 
 rows = day_review()
 if rows:
     st.subheader("逐条复盘")
+    kind_cn = {"model": "模型", "data": "数据", "human": "人为", "none": "没问题"}
     st.dataframe(
         [{"品类": r["name"],
           "预测": r["predicted"],
           "实际": r["actual"],
           "误差": f"{(r['actual']-r['predicted'])/max(r['predicted'],1)*100:+.0f}%",
-          "算谁的": {"model": "模型", "data": "数据", "human": "人为", "none": "没问题"}[r["kind"]]}
+          "算谁的": kind_cn[r["kind"]]}
          for r in rows],
         width="stretch", hide_index=True,
     )
-    st.caption("「算谁的」很重要：如果是数据错了（比如忘了点售罄），就不该去调模型。")
+    st.caption("「算谁的」很重要：如果是数据错了（比如那天卖光了），就不该去调模型。")
+else:
+    st.info("还没有可复盘的数据。")
 
 st.divider()
 
 # ---------------------------------------------------------------- 记分板
-sb = scoreboard()
-st.subheader("这一个月，你和系统谁更准")
+sb = scoreboard(30)
+st.subheader(f"过去 {sb['days']} 天：如果按建议订，会差多少")
 
-c1, c2, c3 = st.columns(3)
-c1.metric("听系统的", f"{sb['follow']['days']} 天",
-          delta=f"平均报废 {sb['follow']['waste']} 个", delta_color="off")
-c2.metric("没听系统的", f"{sb['ignore']['days']} 天",
-          delta=f"平均报废 {sb['ignore']['waste']} 个", delta_color="off")
-c3.metric("多扔了", f"{sb['delta']} 个/天")
+if sb["days"]:
+    c1, c2, c3 = st.columns(3)
+    c1.metric("实际总代价", f"¥{sb['money_actual']:,.0f}")
+    c2.metric("按建议总代价", f"¥{sb['money_model']:,.0f}")
+    c3.metric("省下", f"¥{sb['money_saved']:,.0f}",
+              delta=f"{sb['money_saved']/max(sb['money_actual'],1)*100:.0f}%",
+              delta_color="normal")
 
-st.progress(min(sb["follow"]["days"] / max(sb["follow"]["days"] + sb["ignore"]["days"], 1), 1.0),
-            text=f"采纳率 {sb['follow']['days']}/{sb['follow']['days']+sb['ignore']['days']}")
-
-st.caption("这一栏不谈模型准不准，只谈「你的直觉值多少钱」。")
+    st.markdown("---")
+    st.markdown("**但这不是全面胜利**——看看代价是怎么换的：")
+    d1, d2 = st.columns(2)
+    d1.metric("报废件数", f"{sb['model']['waste']:.0f}",
+              delta=f"{sb['model']['waste']-sb['actual']['waste']:+.0f} 件",
+              delta_color="inverse")
+    d2.metric("断货天数", f"{sb['model']['stockout_days']}",
+              delta=f"{sb['model']['stockout_days']-sb['actual']['stockout_days']:+d} 天",
+              delta_color="inverse")
+    st.caption(
+        f"按建议订会**多报 {sb['model']['waste']-sb['actual']['waste']:.0f} 件**，"
+        f"但**少断货 {sb['actual']['stockout_days']-sb['model']['stockout_days']} 天**。"
+        "报废一件亏成本，断货一件亏毛利——所以总账是省的。"
+    )
+else:
+    st.info("数据不足，攒够两周再看。")
