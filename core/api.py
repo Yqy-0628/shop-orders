@@ -13,7 +13,7 @@ from __future__ import annotations
 
 from datetime import date as _date, datetime, timedelta
 
-from . import connect, pipeline
+from . import connect, pipeline, rules
 
 DEMO_TODAY = "2026-11-09"
 
@@ -35,23 +35,8 @@ def data_issues(day: str | None = None) -> list[dict]:
     返回 [{"code", "sku_id", "name", "message", "fix_hint", "severity"}]
     severity: "block"（必须处理才能继续） | "warn"（提示即可）
     """
-    day = _today(day)
-    conn = connect()
-    rows = _skus(conn)
-    out = []
-
-    # 示例规则：昨天有销售、但没有任何售罄标记，且库存为 0 —— 很可能忘了点
-    # （真实现放在 core/rules.py，这里只保证形状稳定）
-    if rows:
-        s = rows[0]
-        out.append({
-            "code": "missing_soldout",
-            "sku_id": s["sku_id"], "name": s["name"],
-            "message": "昨天有销量，但没记售罄",
-            "fix_hint": "点一下「补录售罄」，或确认当天确实没卖完",
-            "severity": "warn",
-        })
-    return out
+    # 数据异常检查的是「最后一个有数据的日子」，不是预测目标日
+    return rules.data_issues(day)
 
 
 # ---------------------------------------------------------------- 今日待决
@@ -62,22 +47,7 @@ def today_tasks(day: str | None = None) -> list[dict]:
     type: high / low / soldout_streak / waste_repeat
     """
     day = _today(day)
-    conn = connect()
-    rows = _skus(conn)
-    out = []
-    for s, t, title, detail in zip(
-        rows[:3],
-        ["high", "soldout_streak", "low"],
-        ["明天可能偏高", "连续卖光", "明天可能偏低"],
-        ["比平时高 25%，因为周六 + 考试周",
-         "连续 3 天售罄，基准可能偏低",
-         "比平时低 20%，因为最近在回落"],
-    ):
-        out.append({
-            "sku_id": s["sku_id"], "name": s["name"], "type": t,
-            "title": title, "detail": detail, "severity": "warn",
-        })
-    return out
+    return rules.today_tasks(day)
 
 
 # ---------------------------------------------------------------- 预测
