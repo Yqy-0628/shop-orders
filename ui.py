@@ -3,7 +3,7 @@
 import streamlit as st
 
 from core import connect, auth
-from core.metrics import ensure_today, DEMO_TODAY
+from core.metrics import ensure_today, biz_day
 
 ROLE_CN = {"owner": "店主", "clerk": "店员"}
 

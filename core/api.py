@@ -15,13 +15,11 @@ from datetime import date as _date, datetime, timedelta
 
 import json
 
-from . import connect, pipeline, review, rules
-
-DEMO_TODAY = "2026-11-09"
+from . import connect, metrics, pipeline, review, rules
 
 
 def _today(d=None) -> str:
-    return d or DEMO_TODAY
+    return d or metrics.biz_day()
 
 
 def _skus(conn):
@@ -184,6 +182,59 @@ def record_soldout(sku_id: str, hour: int, day: str | None = None) -> dict:
         (sku_id, day, int(hour), 21))
     conn.commit()
     return {"ok": True, "sku_id": sku_id, "day": day, "hour": hour}
+
+
+def record_sale(sku_id: str, qty: int, hour: int | None = None,
+                day: str | None = None) -> dict:
+    """记一笔销量。一天可以记多次，累加进 sales。
+
+    返回该品类当天的累计销量，页面直接显示，免得重复录。
+    """
+    day = _today(day)
+    conn = connect()
+    row = conn.execute("SELECT price FROM sku WHERE sku_id=?", (sku_id,)).fetchone()
+    if row is None:
+        raise KeyError(f"没有这个商品: {sku_id}")
+
+    h = max(9, min(21, int(hour or 15)))
+    wd = datetime.strptime(day, "%Y-%m-%d").weekday()
+    conn.execute(
+        "INSERT INTO sales (sku_id, day, hour, weekday, qty, unit_price) "
+        "VALUES (?,?,?,?,?,?)",
+        (sku_id, day, h, wd, int(qty), row["price"]))
+    conn.commit()
+
+    total = conn.execute(
+        "SELECT COALESCE(SUM(qty),0) FROM sales WHERE sku_id=? AND day=?",
+        (sku_id, day)).fetchone()[0]
+    return {"ok": True, "sku_id": sku_id, "day": day,
+            "qty": int(qty), "total": int(total)}
+
+
+def record_count(sku_id: str, real_qty: int, day: str | None = None) -> dict:
+    """盘点：把账面累计结余调成实盘数，差额写成一条「盘点」流水。"""
+    day = _today(day)
+    conn = connect()
+    row = conn.execute("SELECT cost FROM sku WHERE sku_id=?", (sku_id,)).fetchone()
+    if row is None:
+        raise KeyError(f"没有这个商品: {sku_id}")
+
+    book = 0
+    for r in metrics.stock_rows(conn, day):
+        if r["sku_id"] == sku_id:
+            book = r["qty"]
+            break
+    diff = int(real_qty) - int(book)
+
+    if diff != 0:
+        conn.execute(
+            "INSERT INTO stock_move (sku_id, day, type, qty, unit_cost, status) "
+            "VALUES (?,?,'盘点',?,?,'已到货')",
+            (sku_id, day, diff, row["cost"]))
+        conn.commit()
+
+    return {"ok": True, "sku_id": sku_id, "day": day,
+            "book": int(book), "real": int(real_qty), "diff": diff}
 
 
 # ---------------------------------------------------------------- 记分板

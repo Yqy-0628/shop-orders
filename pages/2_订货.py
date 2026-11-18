@@ -49,14 +49,17 @@ for c, t in zip(cols, s["tiers"]):
         with st.container(border=True):
             st.markdown(f"### {t['name']}")
             st.metric("订多少", f"{t['qty']} 个", label_visibility="collapsed")
-            st.write(f"预计报废 **{t['waste']}** 个")
+            st.write(f"预计报废 **{t['waste']}** 个 ≈ {ui.money(t.get('waste_cost', 0))}")
+            st.write(f"预计断货 **{t['short']}** 个 ≈ {ui.money(t.get('short_cost', 0))}")
             st.write(f"断货概率 **{t['stockout']*100:.0f}%**")
+            st.caption(f"两笔损失合计 ≈ {ui.money(t.get('cost_total', 0))}")
             if st.button("选这档", key=f"pick_{t['key']}", width="stretch"):
                 record_decision(sku, t["qty"])
                 st.success(f"已下单：{t['name']} {t['qty']} 个")
 
 st.divider()
-st.caption("预测是「最可能卖多少」，建议是「为了不断货要备多少」——所以建议量通常比预测高。")
+st.caption("预测是「最可能卖多少」，建议是「为了不断货要备多少」——所以建议量通常比预测高。"
+           "代价按最近 8 个同星期几的真实需求逐个试算：报废 = 订多的件数 ×（进价 − 残值），断货 = 订少的件数 × 毛利。")
 
 with st.expander("我要自己改数量"):
     qty = st.number_input("实际订多少", min_value=1, max_value=999,

@@ -3,10 +3,30 @@
 import datetime as dt
 from statistics import NormalDist
 
-from . import demand as D
+import os
 
-DEMO_TODAY = "2026-11-09"
+from . import connect, demand as D
+
 SEED_END = "2026-11-08"   # 统计只认种子窗口，演示当天写入的记录不参与
+
+
+def biz_day(conn=None):
+    """业务日 = 最近一次「已到货入库」的那天，也就是这批货要卖的那天。
+
+    和以前写死的 2026-11-09 行为一致，但不再硬编码：
+    当天记销售不会把日期推到明天，换一批数据也不用改代码。
+    需要指定时用环境变量 SHOP_BIZ_DAY=YYYY-MM-DD。
+    """
+    env = os.environ.get("SHOP_BIZ_DAY", "").strip()
+    if env:
+        return env
+    conn = conn or connect()
+    last = conn.execute(
+        "SELECT MAX(day) FROM stock_move WHERE status='已到货'").fetchone()[0]
+    if last:
+        return last
+    last = conn.execute("SELECT MAX(day) FROM sales").fetchone()[0]
+    return last or dt.date.today().isoformat()
 
 
 def stock_rows(conn, day):
@@ -29,11 +49,12 @@ def stock_rows(conn, day):
     ).fetchall()
 
 
-def ensure_today(conn, day=DEMO_TODAY):
+def ensure_today(conn, day=None):
     """第一次打开时给“今天”生成一张进货单（按上周同星期销量 × 1.08）。
 
     逐个 SKU 判断，已经有的就不再补——否则反复启动会把库存越堆越多。
     """
+    day = day or biz_day(conn)
     have = {r[0] for r in conn.execute(
         "SELECT DISTINCT sku_id FROM stock_move WHERE day=?", (day,))}
     # 上周同一天，不是“历史上所有星期二”——后者会把 12 周的销量加在一起

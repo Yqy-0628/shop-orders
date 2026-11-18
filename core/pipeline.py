@@ -106,11 +106,12 @@ def forecast(df: pd.DataFrame, weekday: int, k: int = 8) -> dict:
     }
 
 
-def tiers(df: pd.DataFrame, weekday: int) -> list[dict]:
+def tiers(df: pd.DataFrame, weekday: int,
+          unit: tuple | None = None) -> list[dict]:
     """三档建议：围着预测值上下浮动，代价用历史样本实测（不假设分布）。
 
-    省着订 = 预测 × 0.90，稳妥 = × 1.05，保险 = × 1.20。
-    浮动倍数只是「档位的说法」，断货概率和报废量是从历史样本里数出来的。
+    档位倍数 0.90 / 1.00 / 1.25；断货概率、报废量、断货量都从历史样本里数出来。
+    unit=(进价, 售价, 残值) 时，额外把两笔损失折成「元」。
     """
     base = forecast(df, weekday)["value"]
     samples = df[df["weekday"] == weekday]["demand"].values
@@ -119,16 +120,28 @@ def tiers(df: pd.DataFrame, weekday: int) -> list[dict]:
     if len(samples) < 10:
         samples = df["demand"].values
 
+    cost = price = salvage = None
+    if unit:
+        cost, price, salvage = unit
+
     out = []
     for key, name, mult in (("save", "少订一成", 0.90),
                             ("normal", "按预测订", 1.00),
                             ("safe", "多订两成", 1.25)):
         Q = max(1, round(base * mult))
-        out.append({
+        waste = float(np.maximum(0, Q - samples).mean())
+        short = float(np.maximum(0, samples - Q).mean())
+        item = {
             "key": key, "name": name, "qty": Q,
             "stockout": round(float((samples > Q).mean()), 2),
-            "waste": round(float(np.maximum(0, Q - samples).mean()), 1),
-        })
+            "waste": round(waste, 1),
+            "short": round(short, 1),
+        }
+        if unit:
+            item["waste_cost"] = round(waste * (cost - salvage), 1)
+            item["short_cost"] = round(short * (price - cost), 1)
+            item["cost_total"] = round(item["waste_cost"] + item["short_cost"], 1)
+        out.append(item)
     return out
 
 
@@ -148,4 +161,7 @@ def suggest_sku(sku_id: str, weekday: int, conn=None) -> dict | None:
     if df.empty:
         return None
     df = fill_demand(df, hourly_rate(conn, sku_id))
-    return {"tiers": tiers(df, weekday), "recommend": "normal"}
+    s = conn.execute("SELECT cost, price, salvage FROM sku WHERE sku_id=?",
+                     (sku_id,)).fetchone()
+    unit = (s["cost"], s["price"], s["salvage"]) if s else None
+    return {"tiers": tiers(df, weekday, unit), "recommend": "normal"}
