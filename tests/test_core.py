@@ -1,0 +1,145 @@
+# -*- coding: utf-8 -*-
+"""核心逻辑单元测试。
+
+跑法：python -m unittest discover -s tests -v
+每个用例用一份数据库副本，测完删掉，不碰 data/shop.db。
+"""
+import datetime as dt
+import os
+import shutil
+import sys
+import tempfile
+import unittest
+from pathlib import Path
+
+ROOT = Path(__file__).resolve().parent.parent
+sys.path.insert(0, str(ROOT))
+
+import core
+from core import api, metrics, pipeline
+
+
+class ShopCase(unittest.TestCase):
+    """公共夹具：临时库 + 常用查询。"""
+
+    def setUp(self):
+        self.dir = Path(tempfile.mkdtemp())
+        self.db = self.dir / "shop.db"
+        shutil.copy2(ROOT / "data" / "shop.db", self.db)
+        self._old = core.DB_PATH
+        core.DB_PATH = self.db
+        self.conn = core.connect()
+
+    def tearDown(self):
+        self.conn.close()
+        core.DB_PATH = self._old
+        shutil.rmtree(self.dir, ignore_errors=True)
+
+    def any_sku(self):
+        return self.conn.execute(
+            "SELECT sku_id FROM sku ORDER BY sku_id LIMIT 1").fetchone()["sku_id"]
+
+    def sku_with_stockout(self):
+        return self.conn.execute(
+            "SELECT sku_id FROM stockout_mark GROUP BY sku_id "
+            "ORDER BY COUNT(*) DESC LIMIT 1").fetchone()["sku_id"]
+
+    def book(self, sku, day):
+        for r in metrics.stock_rows(self.conn, day):
+            if r["sku_id"] == sku:
+                return r["qty"]
+        return 0
+
+
+class TestBizDay(ShopCase):
+    """业务日：跟着数据走，不受记账影响。"""
+
+    def test_follows_data_and_env(self):
+        last = self.conn.execute(
+            "SELECT MAX(day) FROM stock_move WHERE status='已到货'").fetchone()[0]
+        self.assertEqual(metrics.biz_day(self.conn), last)
+
+        os.environ["SHOP_BIZ_DAY"] = "2027-01-01"
+        try:
+            self.assertEqual(metrics.biz_day(self.conn), "2027-01-01")
+        finally:
+            os.environ.pop("SHOP_BIZ_DAY", None)
+
+    def test_sale_does_not_move_biz_day(self):
+        day = metrics.biz_day(self.conn)
+        api.record_sale(self.any_sku(), 3, 12, day)
+        self.assertEqual(metrics.biz_day(self.conn), day)
+
+
+class TestFillDemand(ShopCase):
+    """补齐：卖光那天的销量是下限，要按缺货时长把需求补回来。"""
+
+    def test_soldout_days_are_restored(self):
+        sku = self.sku_with_stockout()
+        df = pipeline.load_daily(self.conn, sku)
+        rate = pipeline.hourly_rate(self.conn, sku)
+        self.assertGreater(rate, 0)
+
+        filled = pipeline.fill_demand(df, rate)
+        soldout = filled[filled["soldout"]]
+        self.assertGreater(len(soldout), 0)
+        self.assertTrue((soldout["demand"] > soldout["sold"]).all())
+
+        normal = filled[~filled["soldout"]]
+        self.assertTrue((normal["demand"] == normal["sold"]).all())
+
+
+class TestTiers(ShopCase):
+    """三档建议：数量递增、代价齐全、合计等于两笔相加。"""
+
+    def test_ordered_and_costed(self):
+        sku = self.any_sku()
+        day = metrics.biz_day(self.conn)
+        weekday = dt.date.fromisoformat(day).weekday()
+        out = pipeline.suggest_sku(sku, weekday, self.conn)["tiers"]
+
+        self.assertEqual([t["key"] for t in out], ["save", "normal", "safe"])
+        qty = [t["qty"] for t in out]
+        self.assertTrue(all(qty[i] <= qty[i + 1] for i in range(len(qty) - 1)))
+
+        for t in out:
+            for k in ("waste", "short", "waste_cost", "short_cost", "cost_total"):
+                self.assertIn(k, t)
+            self.assertAlmostEqual(t["cost_total"],
+                                   t["waste_cost"] + t["short_cost"], places=1)
+
+        # 订得越多，预期断货的件数不应增加
+        self.assertLessEqual(out[2]["short"], out[0]["short"])
+
+
+class TestRecording(ShopCase):
+    """录入：销量累加不覆盖，盘点能把账调平且可重复执行。"""
+
+    def test_sale_accumulates(self):
+        sku = self.any_sku()
+        day = metrics.biz_day(self.conn)
+        api.record_sale(sku, 4, 11, day)
+        r = api.record_sale(sku, 6, 15, day)
+        self.assertEqual(r["day"], day)
+        self.assertEqual(r["total"], 10)
+
+    def test_count_reconciles_and_is_idempotent(self):
+        sku = self.any_sku()
+        day = metrics.biz_day(self.conn)
+        before = self.book(sku, day)
+        target = max(0, before - 3)
+
+        r = api.record_count(sku, target, day)
+        self.assertEqual(self.book(sku, day), target)
+        self.assertEqual(r["diff"], target - before)
+
+        sql = ("SELECT COUNT(*) FROM stock_move "
+               "WHERE type='盘点' AND day=? AND sku_id=?")
+        n0 = self.conn.execute(sql, (day, sku)).fetchone()[0]
+        api.record_count(sku, target, day)
+        n1 = self.conn.execute(sql, (day, sku)).fetchone()[0]
+        self.assertEqual(n0, n1)
+
+
+if __name__ == "__main__":
+    unittest.main()
