@@ -12,6 +12,7 @@ import numpy as np
 import pandas as pd
 
 from . import connect
+from .order import costs, q_star, service_level
 
 OPEN_H, CLOSE_H = 9, 21
 HORIZON = CLOSE_H - OPEN_H
@@ -155,6 +156,31 @@ def predict_sku(sku_id: str, weekday: int, conn=None) -> dict | None:
     return forecast(df, weekday)
 
 
+def optimum(df: pd.DataFrame, weekday: int, unit: tuple) -> dict:
+    """报童最优量：Q* = μ + z(临界比) × σ。
+
+    μ 必须和预测用同一个基准——同星期几的补齐均值再乘趋势，
+    否则周一按全周平均订、周五也按全周平均订，两个都不对。
+    σ 优先用同星期几样本的标准差，样本不足四周时退回全周尾部。
+    """
+    f = forecast(df, weekday)
+    mu = float(f["value"])
+
+    hist = df[df["weekday"] == weekday]
+    if len(hist) >= 4:
+        sigma = float(hist["demand"].tail(8).std())
+    else:
+        sigma = float(df["demand"].tail(28).std())
+    sigma = max(0.0, sigma)
+
+    cost, price, salvage = unit
+    cr = service_level(cost, price, salvage)
+    cu, co = costs(cost, price, salvage)
+    return {"qty": max(1, round(q_star(mu, sigma, cost, price, salvage))),
+            "mu": round(mu, 1), "sigma": round(sigma, 1),
+            "cr": round(cr, 3), "cu": round(cu, 2), "co": round(co, 2)}
+
+
 def suggest_sku(sku_id: str, weekday: int, conn=None) -> dict | None:
     conn = conn or connect()
     df = load_daily(conn, sku_id)
@@ -164,4 +190,8 @@ def suggest_sku(sku_id: str, weekday: int, conn=None) -> dict | None:
     s = conn.execute("SELECT cost, price, salvage FROM sku WHERE sku_id=?",
                      (sku_id,)).fetchone()
     unit = (s["cost"], s["price"], s["salvage"]) if s else None
-    return {"tiers": tiers(df, weekday, unit), "recommend": "normal"}
+    out = {"tiers": tiers(df, weekday, unit), "recommend": "normal", "optimum": None}
+    if unit:
+        out["optimum"] = optimum(df, weekday, unit)
+    return out
+    return out

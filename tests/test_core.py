@@ -141,5 +141,56 @@ class TestRecording(ShopCase):
         self.assertEqual(n0, n1)
 
 
+class TestOptimum(ShopCase):
+    """报童最优量：与 μ、σ、临界比的关系必须自洽。"""
+
+    def _opt(self, sku):
+        day = metrics.biz_day(self.conn)
+        wd = dt.datetime.strptime(day, "%Y-%m-%d").weekday()
+        return pipeline.suggest_sku(sku, wd, self.conn)["optimum"]
+
+    def test_above_mean_when_stockout_costs_more(self):
+        opt = self._opt(self.any_sku())
+        self.assertIsNotNone(opt)
+        # 毛利高于过剩损失时临界比超过一半，最优量应高于均值
+        self.assertGreater(opt["cr"], 0.5)
+        self.assertGreater(opt["qty"], opt["mu"])
+
+    def test_matches_formula(self):
+        from core.order import q_star, service_level
+
+        sku = self.any_sku()
+        opt = self._opt(sku)
+        row = self.conn.execute(
+            "SELECT cost, price, salvage FROM sku WHERE sku_id=?", (sku,)).fetchone()
+        expect = max(1, round(q_star(opt["mu"], opt["sigma"],
+                                     row["cost"], row["price"], row["salvage"])))
+        self.assertEqual(opt["qty"], expect)
+        self.assertAlmostEqual(opt["cr"], round(
+            service_level(row["cost"], row["price"], row["salvage"]), 3))
+
+
+class TestUpdateSku(ShopCase):
+    """商品档案可改，且拒绝会算错临界比的参数。"""
+
+    def test_updates_price(self):
+        sku = self.any_sku()
+        old = self.conn.execute(
+            "SELECT price FROM sku WHERE sku_id=?", (sku,)).fetchone()[0]
+        api.update_sku(sku, price=old + 1)
+        new = self.conn.execute(
+            "SELECT price FROM sku WHERE sku_id=?", (sku,)).fetchone()[0]
+        self.assertAlmostEqual(new, old + 1, places=6)
+
+    def test_rejects_bad_prices(self):
+        sku = self.any_sku()
+        with self.assertRaises(ValueError):
+            api.update_sku(sku, cost=999.0)
+        with self.assertRaises(ValueError):
+            api.update_sku(sku, salvage=999.0)
+        with self.assertRaises(ValueError):
+            api.update_sku(sku, shelf_life_days=0)
+
+
 if __name__ == "__main__":
     unittest.main()

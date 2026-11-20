@@ -94,7 +94,8 @@ def suggest(sku_id: str, day: str | None = None) -> dict:
     if r is None:
         raise ValueError(f"{sku_id} 没有销售记录，无法给建议")
     return {"sku_id": sku_id, "day": day,
-            "tiers": r["tiers"], "recommend": r["recommend"]}
+            "tiers": r["tiers"], "recommend": r["recommend"],
+            "optimum": r.get("optimum")}
 
 
 # ---------------------------------------------------------------- 记录
@@ -259,3 +260,41 @@ def auto_lines(day: str | None = None) -> list[dict]:
     conn = connect()
     return [{"sku_id": s["sku_id"], "name": s["name"],
              "qty": round(float(s["mu"]))} for s in _skus(conn)[3:]]
+
+
+# ---------------------------------------------------------------- 商品档案维护
+def update_sku(sku_id: str, cost: float | None = None, price: float | None = None,
+               salvage: float | None = None, shelf_life_days: int | None = None) -> dict:
+    """改商品档案里的价格与保质期。
+
+    进价、售价、残值决定临界比，保质期决定报废口径，所以这四项必须能改，
+    否则换一家店就得改数据库。校验规则：都为正数，售价高于进价，残值低于进价。
+    """
+    conn = connect()
+    row = conn.execute(
+        "SELECT cost, price, salvage, shelf_life_days FROM sku WHERE sku_id=?",
+        (sku_id,)).fetchone()
+    if row is None:
+        raise KeyError(f"没有这个商品: {sku_id}")
+
+    new = {
+        "cost": float(cost if cost is not None else row["cost"]),
+        "price": float(price if price is not None else row["price"]),
+        "salvage": float(salvage if salvage is not None else row["salvage"]),
+        "shelf_life_days": int(shelf_life_days if shelf_life_days is not None
+                               else row["shelf_life_days"]),
+    }
+    if min(new["cost"], new["price"], new["salvage"]) <= 0:
+        raise ValueError("进价、售价、残值都必须大于 0")
+    if new["price"] <= new["cost"]:
+        raise ValueError("售价必须高于进价，否则每卖一件都在亏")
+    if new["salvage"] >= new["cost"]:
+        raise ValueError("残值必须低于进价，否则多订一件反而赚钱")
+    if not 1 <= new["shelf_life_days"] <= 7:
+        raise ValueError("保质期只支持 1 至 7 天")
+
+    conn.execute(
+        "UPDATE sku SET cost=?, price=?, salvage=?, shelf_life_days=? WHERE sku_id=?",
+        (new["cost"], new["price"], new["salvage"], new["shelf_life_days"], sku_id))
+    conn.commit()
+    return {"ok": True, "sku_id": sku_id, **new}

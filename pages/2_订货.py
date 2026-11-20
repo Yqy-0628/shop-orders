@@ -65,9 +65,25 @@ for c, t in zip(cols, s["tiers"]):
                 record_decision(sku, t["qty"])
                 st.success(f"已下单：{t['name']} {t['qty']} 个")
 
+opt = s.get("optimum")
+if opt:
+    with st.container(border=True):
+        st.markdown("### 按报童模型算的最优量")
+        a, b, c = st.columns(3)
+        a.metric("最优订货量", f"{opt['qty']} 个")
+        b.metric("临界比", f"{opt['cr']:.2f}")
+        c.metric("μ 与 σ", f"{opt['mu']:.0f} / {opt['sigma']:.1f}")
+        st.caption(f"缺货一件少赚 ￥{opt['cu']:.2f}，多订一件亏 ￥{opt['co']:.2f}；"
+                   f"临界比 {opt['cr']:.2f} 表示按这个量备货，有 {opt['cr']*100:.0f}% 的把握不断货。"
+                   f"三档是它的粗粒度近似，两者可以互相对照。")
+        if st.button("按最优量下单", key="pick_opt", width="stretch"):
+            record_decision(sku, int(opt["qty"]))
+            st.success(f"已下单：报童最优量 {opt['qty']} 个")
+
 st.divider()
 st.caption("预测是「最可能卖多少」，建议是「为了不断货要备多少」——所以建议量通常比预测高。"
-           "代价按最近 8 个同星期几的真实需求逐个试算：报废 = 订多的件数 ×（进价 − 残值），断货 = 订少的件数 × 毛利。")
+           "三档的代价按最近 8 个同星期几的真实需求逐个试算：报废 = 订多的件数 ×（进价 − 残值），"
+           "断货 = 订少的件数 × 毛利；报童最优量则由临界比直接定出，不受倍数影响。")
 
 with st.expander("我要自己改数量"):
     qty = st.number_input("实际订多少", min_value=1, max_value=999,
