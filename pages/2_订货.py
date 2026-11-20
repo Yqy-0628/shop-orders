@@ -10,11 +10,19 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 import ui
 from core import connect
 from core.api import predict, suggest, record_decision
+from core.readiness import readiness
 
 ui.page("订货", "📦")
 user = ui.guard()
 
 st.title("📦 明天订多少")
+
+r = readiness()
+if r["mode"] == "full":
+    st.caption(f"数据就绪度：{r['label']}　每单品中位 {r['median']} 天；"
+               f"{len(r['weak'])} 个单品不足 14 天")
+else:
+    st.info(f"数据就绪度：{r['label']}　{r['advice']}")
 
 names = [dict(r) for r in connect().execute(
     "SELECT sku_id, name FROM sku ORDER BY sku_id")]
