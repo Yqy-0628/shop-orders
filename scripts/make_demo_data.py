@@ -1,8 +1,8 @@
 # -*- coding: utf-8 -*-
 """生成 20 个 SKU × 84 天的仿真流水（含缺货截断）。
 
-订货策略刻意设为「上周同星期销量 × 0.95」——模拟老板怕报损、故意少订。
-这正是我们要证明的那个行为。
+订货策略刻意设为「上周同星期销量 × 1.08」——模拟老板怕报损、只小幅加订，
+整体仍然偏保守。这正是我们要证明的那个行为。
 """
 import csv
 import random
@@ -19,6 +19,10 @@ OPEN_H, CLOSE_H = 9, 21          # 营业 9:00-21:00
 HOURS = list(range(OPEN_H, CLOSE_H))   # 9..20 共 12 个时段
 WEIGHTS = [0.40, 0.50, 0.60, 0.90, 1.20, 1.50, 1.40, 1.00, 0.90, 0.80, 0.70, 0.60]
 WEEKDAY_FACTOR = {0: 0.92, 1: 0.88, 2: 0.96, 3: 1.00, 4: 1.14, 5: 1.30, 6: 1.24}
+
+# 贴在包装上的短码：品类一位 + 单品两位，纯 ASCII，Code128 可直接编码
+CAT_CODE = {"日配": "SH1", "烘焙": "SH2", "饮品": "SH3", "鲜食": "SH4"}
+
 
 TEMPLATES = {
     "烘焙": dict(prefix="烘焙", price=12.0, cost=6.0, salvage=2.4, shelf=1, mu=18,
@@ -37,6 +41,7 @@ for cat, t in TEMPLATES.items():
         mu = t["mu"] * random.uniform(0.85, 1.15)
         SKUS.append(dict(
             sku_id=f"{cat[:2]}{i:02d}",
+            barcode=f"{CAT_CODE[cat]}{i:02d}",
             name=nm,
             category=cat,
             cost=round(t["cost"] * random.uniform(0.95, 1.05), 2),
@@ -112,9 +117,9 @@ def main():
             w.writerows(rows)
         print(f"{name:16s} {len(rows):>6d} 行")
 
-    dump("sku.csv", ["sku_id", "name", "category", "cost", "price",
+    dump("sku.csv", ["sku_id", "barcode", "name", "category", "cost", "price",
                      "salvage", "shelf_life_days", "mu", "sigma"],
-         [[s["sku_id"], s["name"], s["category"], s["cost"], s["price"],
+         [[s["sku_id"], s["barcode"], s["name"], s["category"], s["cost"], s["price"],
            s["salvage"], s["shelf_life_days"], s["mu"], s["sigma"]] for s in SKUS])
     dump("stock_move.csv", ["sku_id", "day", "type", "qty", "unit_cost", "status"], move_rows)
     dump("sales.csv", ["sku_id", "day", "hour", "weekday", "qty", "unit_price"], sales_rows)

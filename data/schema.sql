@@ -9,6 +9,7 @@ DROP TABLE IF EXISTS app_user;
 
 CREATE TABLE sku (
   sku_id          TEXT PRIMARY KEY,
+  barcode         TEXT UNIQUE,      -- 贴在包装上的短码，扫码即可定位到单品
   name            TEXT NOT NULL,
   category        TEXT NOT NULL,
   cost            REAL NOT NULL,
