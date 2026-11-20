@@ -8,7 +8,7 @@ import streamlit as st
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 import ui
-from core.api import data_issues, today_tasks, auto_lines
+from core.api import data_issues, today_tasks, auto_lines, day_close
 
 ui.page("今日", "☀️")
 user = ui.guard()
@@ -30,6 +30,31 @@ if issues:
                 st.session_state["sku_id"] = it["sku_id"]
                 st.switch_page("pages/3_记录.py")
     st.divider()
+
+# ---------------------------------------------------------------- 收工日报
+close = day_close()
+sm = close["summary"]
+st.subheader(f"🧾 {sm['day']} 收工账")
+c1, c2, c3, c4 = st.columns(4)
+c1.metric("进了", f"{sm['in']:,} 件")
+c2.metric("卖了", f"{sm['sold']:,} 件")
+c3.metric("报损", f"{sm['waste']:,} 件")
+c4.metric("收工还剩", f"{sm['left']:,} 件")
+
+for tip in close["tips"]:
+    st.warning(tip)
+
+with st.expander(f"按品类看这天的账（{sm['skus']} 个）", expanded=False):
+    st.dataframe(
+        [{"品类": r["name"], "进": r["in"], "卖": r["sold"], "报损": r["waste"],
+          "收工剩": r["left"],
+          "卖光时刻": f"{r['hour']}:00" if r["hour"] else "没卖光",
+          "提示": "" if r["flag"] == "正常" else r["flag"]}
+         for r in close["rows"]],
+        width="stretch", hide_index=True)
+    st.caption("「剩不少」是明天该少做的信号，「账不平」是流水漏记、要去盘点。")
+
+st.divider()
 
 # ---------------------------------------------------------------- 待决事项
 tasks = today_tasks()

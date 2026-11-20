@@ -16,7 +16,7 @@ ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT))
 
 import core
-from core import api, metrics, pipeline
+from core import api, metrics, pipeline, importer
 
 
 class ShopCase(unittest.TestCase):
@@ -193,6 +193,108 @@ class TestUpdateSku(ShopCase):
             api.update_sku(sku, salvage=999.0)
         with self.assertRaises(ValueError):
             api.update_sku(sku, shelf_life_days=0)
+
+
+class TestArrival(ShopCase):
+    """到货：少送了要留痕，数量以实收为准。"""
+
+    def test_gap_between_order_and_receipt(self):
+        sku = self.any_sku()
+        day = metrics.biz_day(self.conn)
+        self.conn.execute(
+            "DELETE FROM stock_move WHERE sku_id=? AND day=?", (sku, day))
+        self.conn.commit()
+
+        api.record_decision(sku, 30, None, day)
+        r = api.record_arrival(sku, 25, day)
+        self.assertEqual(r["expected"], 30)
+        self.assertEqual(r["diff"], -5)
+
+        moves = [dict(x) for x in self.conn.execute(
+            "SELECT qty, status FROM stock_move WHERE sku_id=? AND day=?", (sku, day))]
+        self.assertEqual(len(moves), 1)
+        self.assertEqual(moves[0]["qty"], 25)
+        self.assertEqual(moves[0]["status"], "已到货")
+
+        logs = self.conn.execute(
+            "SELECT params_json FROM decision_log WHERE sku_id=? AND ts>=? ",
+            (sku, dt.date.today().isoformat())).fetchall()
+        self.assertTrue(any("arrival_diff" in x["params_json"] for x in logs))
+
+    def test_no_order_means_no_gap(self):
+        sku = self.any_sku()
+        day = metrics.biz_day(self.conn)
+        self.conn.execute(
+            "DELETE FROM stock_move WHERE sku_id=? AND day=?", (sku, day))
+        self.conn.commit()
+        r = api.record_arrival(sku, 12, day)
+        self.assertIsNone(r["expected"])
+        self.assertIsNone(r["diff"])
+
+
+class TestImport(ShopCase):
+    """导入：认字段、认单品、拒脏行；写入后销售真的进库。"""
+
+    def test_reads_semicolon_and_gbk(self):
+        raw = "日期;单品;数量\n2026-11-10;SH203;26\n".encode("gbk")
+        headers, rows = core.importer.read_bytes(raw)
+        self.assertEqual(headers, ["日期", "单品", "数量"])
+        self.assertEqual(len(rows), 1)
+
+    def test_normalizes_dates(self):
+        n = core.importer.norm_day
+        for s in ("2026-11-20", "2026/11/20", "20261120", "2026年11月20日",
+                  "2026-11-20 08:30", "26-11-20"):
+            self.assertEqual(n(s), "2026-11-20", s)
+        for s in ("", "乱七八糟", "2026-13-40", "2026-11"):
+            self.assertIsNone(n(s), s)
+
+    def test_resolves_sku_three_ways(self):
+        skus = core.importer._skus()
+        self.assertEqual(core.importer.resolve_sku("SH203", skus)["sku_id"], "烘焙03")
+        self.assertEqual(core.importer.resolve_sku("菠萝包", skus)["sku_id"], "烘焙03")
+        self.assertIsNone(core.importer.resolve_sku("不存在的东西", skus))
+
+    def test_rejects_dirty_rows(self):
+        headers = ["日期", "单品", "数量"]
+        rows = [["2026-11-10", "SH203", "26"],
+                ["坏日期", "SH203", "10"],
+                ["2026-11-10", "没这个货", "10"],
+                ["2026-11-10", "SH203", "-3"]]
+        mapping = core.importer.guess_map(headers)
+        ok, bad = core.importer.check(headers, rows, mapping)
+        self.assertEqual(len(ok), 1)
+        self.assertEqual(len(bad), 3)
+
+    def test_commit_writes_sales(self):
+        self.conn.execute("DELETE FROM sales WHERE day='2026-11-10'")
+        self.conn.commit()
+        headers = ["日期", "单品", "数量", "单价"]
+        rows = [["2026-11-10", "SH203", "26", "11.9"],
+                ["2026-11-10", "SH302", "13", ""]]
+        mapping = core.importer.guess_map(headers)
+        ok, _ = core.importer.check(headers, rows, mapping)
+        res = core.importer.commit(ok)
+
+        self.assertEqual(res["rows"], 2)
+        self.assertEqual(res["units"], 39)
+        self.assertEqual(res["skus"], 2)
+        got = self.conn.execute(
+            "SELECT SUM(qty) FROM sales WHERE day='2026-11-10'").fetchone()[0]
+        self.assertEqual(got, 39)
+
+    def test_reconcile_flags_oversell(self):
+        sku = "烘焙03"
+        day = "2026-11-10"
+        opening = self.conn.execute(
+            "SELECT COALESCE(SUM(qty),0) FROM stock_move "
+            "WHERE status='已到货' AND day<? AND sku_id=?", (day, sku)).fetchone()[0]
+        core.importer.commit([{"line": 2, "sku_id": sku, "name": "菠萝包",
+                               "day": day, "qty": int(opening) + 500,
+                               "price": None, "hour": None}])
+        rec = core.importer.reconcile(day, day)
+        kinds = [i["kind"] for i in rec["issues"] if i["sku_id"] == sku]
+        self.assertIn("超卖", kinds)
 
 
 if __name__ == "__main__":

@@ -59,8 +59,14 @@ with r2c1:
             pick = st.selectbox("品类", list(labels.keys()), index=idx, key="a_sku")
             qty = st.number_input("实收数量", min_value=0, max_value=999, value=30)
             if st.form_submit_button("确认到货", width="stretch"):
-                record_arrival(labels[pick], int(qty))
-                st.success(f"{pick.split()[1]} 到货 {qty} 个")
+                r = record_arrival(labels[pick], int(qty))
+                nm = pick.split()[1]
+                if r["diff"]:
+                    st.warning(
+                        f"{nm} 应到 {r['expected']}，实收 {qty}，差 {r['diff']:+d} 件 —— "
+                        f"已按实收记账，差异留在流水里备查")
+                else:
+                    st.success(f"{nm} 到货 {qty} 个")
 
 with r2c2:
     with st.container(border=True):
