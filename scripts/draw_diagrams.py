@@ -60,48 +60,80 @@ def arrow(d, p1, p2, color=LINE, w=3, head=12, dash=False):
 
 
 # ---------------------------------------------------------------- IPO
+def chip(d, right, y, s, fill, fg):
+    """框右上角的页面小标签。right 是标签右边缘的 x。"""
+    ft = f(FR, 13)
+    w, h = tw(d, s, ft)
+    d.rounded_rectangle((right - w - 20, y, right, y + 22), radius=8, fill=fill)
+    d.text((right - w - 14, y + 3), s, font=ft, fill=fg)
+
+
 def draw_ipo():
-    W, H = 1680, 900
+    W, H = 1680, 1030
     img = Image.new("RGB", (W, H), WHITE)
     d = ImageDraw.Draw(img)
 
-    d.text((70, 40), "IPO 模型：这家小店的信息系统", font=f(FB, 40), fill=NAVY)
-    d.text((72, 94), "输入 → 处理 → 输出　三列是整体映射，不是逐行对应",
-           font=f(FR, 19), fill=GREY)
+    d.text((70, 34), "IPO 模型：订货决策系统的八页实现", font=f(FB, 40), fill=NAVY)
+    d.text((72, 90), "输入 → 处理 → 输出　三列是整体映射，不是逐行对应；框右上角标的是它落在哪一页",
+           font=f(FR, 18), fill=GREY)
+
+    CW, CH, GAP = 460, 122, 152
+    TOP, HEAD = 160, 84
 
     cols = [
-        dict(x=70, title="输入 INPUT", fill=(236, 243, 250), edge=BLUE,
-             items=[("开单记录", "商品 / 数量 / 时段"),
-                    ("售罄标记", "哪款卖完了（一键）"),
-                    ("进货与报损", "到货量、进价、报废量"),
-                    ("参数设置", "残值率 / 缺货代价")]),
-        dict(x=610, title="处理 PROCESS", fill=(240, 247, 240), edge=(58, 118, 78),
-             items=[("需求补齐", "售罄时长 × 同期历史时段销量率"),
-                    ("报童模型", "临界比 → z　　Q* = μ + z·σ"),
-                    ("指标计算", "缺货率 / 报损率 / 周转"),
-                    ("偏差诊断", "按品类算订货偏差")]),
-        dict(x=1150, title="输出 OUTPUT", fill=(252, 244, 236), edge=GOLD,
-             items=[("建议订货量", "今天该订多少件"),
-                    ("缺货损失 + 漏钱 Top5", "一直没被算过的那笔钱"),
-                    ("经营日报 + 库存预警", "店长每天看的一屏"),
-                    ("品类偏差", "哪类总订多、哪类总订少")]),
+        dict(x=70, title="输入 INPUT", note="三个入口页：收银、记录、设置",
+             fill=(236, 243, 250), edge=BLUE, chipbg=(219, 231, 247),
+             items=[("扫码流水", "码 → 单品 × 件数 × 时段", "收银页"),
+                    ("到货与报损", "入库 / 在途 / 报损 / 盘点", "记录页"),
+                    ("售罄标记", "哪一款、几点卖光（一键）", "记录页"),
+                    ("商品档案", "进价 / 售价 / 残值 / 保质期", "设置页")]),
+        dict(x=610, title="处理 PROCESS", note="每天重算：μ → Q* → 建议 → 明日实测 → 回到 μ",
+             fill=(240, 247, 240), edge=(58, 118, 78), chipbg=(226, 240, 228),
+             items=[("需求补齐", "卖光后的缺口 × 同期时段销量率，还原真实需求", "core/pipeline"),
+                    ("基线 + 趋势", "同星期几均值 × 近期趋势 → μ（均值）", "core/pipeline"),
+                    ("报童模型", "临界比 → z　　Q* = μ + z·σ", "core/order"),
+                    ("分档与诊断", "数据就绪度三档 + 品类订货偏差", "core/readiness")]),
+        dict(x=1150, title="输出 OUTPUT", note="四个界面：每一框都能在屏幕上点到",
+             fill=(252, 244, 236), edge=GOLD, chipbg=(248, 232, 213),
+             items=[("建议订货量", "保守 / 正常 / 积极 + 报童最优量 Q*", "订货页"),
+                    ("错在哪（复盘）", "按建议订会差多少：省多少、代价怎么换", "复盘页"),
+                    ("经营看板", "卖了多少 vs 进了多少、品类偏差、三件事", "看板页"),
+                    ("标签与条码", "打印标签 → 扫码收银 → 回到输入", "标签页")]),
     ]
-    CW = 460
 
     for c in cols:
-        x, y = c["x"], 158
-        box(d, (x, y, x + CW, y + 56), c["edge"], c["edge"], r=10)
-        center(d, (x, y, x + CW, y + 56), c["title"], f(FB, 24), WHITE)
-        for j, (t, sub) in enumerate(c["items"]):
-            by = 244 + j * 156
-            box(d, (x, by, x + CW, by + 126), c["fill"], c["edge"])
+        x, y = c["x"], TOP
+        box(d, (x, y, x + CW, y + HEAD), c["edge"], c["edge"], r=10)
+        center(d, (x, y + 8, x + CW, y + 52), c["title"], f(FB, 24), WHITE)
+        center(d, (x, y + 52, x + CW, y + 78), c["note"], f(FR, 13), WHITE)
+        for j, (t, sub, page) in enumerate(c["items"]):
+            by = TOP + HEAD + 16 + j * GAP
+            box(d, (x, by, x + CW, by + CH), c["fill"], c["edge"])
             d.text((x + 20, by + 14), t, font=f(FB, 21), fill=NAVY)
-            d.text((x + 20, by + 56), sub, font=f(FR, 16), fill=GREY)
+            d.text((x + 20, by + 54), sub, font=f(FR, 15), fill=GREY)
+            chip(d, x + CW - 12, by + CH - 30, page, c["chipbg"], GREY)
 
-    # 两条大箭头：表达“整列流向整列”，而不是逐行
-    for x in (538, 1078):
-        d.line([(x, 500), (x + 56, 500)], fill=BLUE, width=6)
-        d.polygon([(x + 56, 484), (x + 72, 500), (x + 56, 516)], fill=BLUE)
+    # 两条大箭头：表达“整列流向整列”，而不是逐行对应
+    ay = TOP + HEAD + 16 + CH // 2 + GAP
+    for x in (534, 1074):
+        d.line([(x, ay), (x + 52, ay)], fill=BLUE, width=6)
+        d.polygon([(x + 52, ay - 15), (x + 72, ay), (x + 52, ay + 15)], fill=BLUE)
+
+    # 反馈回边：决策留痕与实际销量回灌成样本
+    bottom = TOP + HEAD + 16 + 3 * GAP + CH
+    ry = bottom + 62
+    d.line([(1150 + CW / 2, bottom), (1150 + CW / 2, ry)], fill=(58, 118, 78), width=4)
+    d.line([(1150 + CW / 2, ry), (300, ry)], fill=(58, 118, 78), width=4)
+    d.line([(300, ry), (300, bottom + 4)], fill=(58, 118, 78), width=4)
+    d.polygon([(285, bottom + 26), (300, bottom + 2), (315, bottom + 26)], fill=(58, 118, 78))
+    center(d, (352, ry - 46, 1010, ry - 16),
+           "反馈回边：谁下的单、建议多少、实际订多少、当天卖了多少 —— 全部回灌成下一天的样本",
+           f(FB, 16), (58, 118, 78))
+
+    d.text((70, H - 74), "读法：框内是本系统真的有的一步，不是设想的模块。政策/门店差异只改「商品档案」，"
+                         "其余四层不动。", font=f(FR, 15), fill=GREY)
+    d.text((70, H - 46), "三档：数据不足 14 天只做记录与补齐；14 天进过渡档；28 天才打开区间与报童建议。",
+           font=f(FR, 15), fill=GREY)
 
     img.save(OUT / "ipo.png")
     print("ipo.png")
@@ -128,9 +160,10 @@ def draw_er():
         "stock_move": (70, 720, 430, [("id", "PK"), ("sku_id", "FK"), ("day 日期", ""),
                                       ("type 入库/报损/盘点", ""), ("qty 数量（±）", ""),
                                       ("unit_cost 进价", ""), ("status 在途/已到货", "")]),
-        "sku": (660, 150, 430, [("sku_id", "PK"), ("name 品名", ""), ("category 品类", ""),
-                                ("cost 进价", ""), ("price 售价", ""), ("salvage 残值", ""),
-                                ("shelf_life 保质期", ""), ("mu / sigma 均值方差", "")]),
+        "sku": (660, 150, 430, [("sku_id", "PK"), ("barcode 条码", "U"), ("name 品名", ""),
+                                ("category 品类", ""), ("cost 进价", ""), ("price 售价", ""),
+                                ("salvage 残值", ""), ("shelf_life 保质期", ""),
+                                ("mu / sigma 均值方差", "")]),
         "decision_log": (660, 540, 430, [("id", "PK"), ("ts 时间", ""),
                                          ("username 操作人", "FK"), ("sku_id", "FK"),
                                          ("params_json 参数", ""), ("q_star 建议量", ""),
@@ -214,14 +247,14 @@ def draw_flow():
             d.text((x + 14, y + 40 + i * 21), s, font=fs, fill=GREY)
 
     node(60, 150, "① 进货入库", ["到货量、进价"], GREYF, GREY)
-    node(420, 150, "② 顾客要买", ["报一个商品"], GREYF, GREY)
+    node(420, 150, "② 顾客要买", ["扫一件标签码"], GREYF, GREY)
     node(780, 150, "③ 还有货吗？", ["库存 > 0"], WHITE, BLUE)
     node(1140, 150, "④ 开单扣库存", ["成交，记一条销售"], GREYF, GREY)
 
     node(60, 380, "⑨ 报损登记", ["过期 / 损坏"], GREYF, GREY, dash=True)
     node(420, 380, "⑥ 需求补齐", ["缺货时长 × 同期时段率"], LIGHT, BLUE)
     node(780, 380, "⑤ 售罄标记", ["一次点击，记时刻"], (252, 240, 240), ACCENT)
-    node(1140, 380, "⑩ 经营看板", ["日报 / 预警 / 漏钱 Top5"], (250, 250, 246), GOLD, dash=True)
+    node(1140, 380, "⑩ 经营看板", ["卖 vs 进 / 品类偏差"], (250, 250, 246), GOLD, dash=True)
 
     node(780, 600, "⑦ 订货决策", ["报童公式 → Q*"], LIGHT, BLUE)
     node(1140, 600, "⑧ 订货单", ["次日到货"], LIGHT, BLUE)

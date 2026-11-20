@@ -118,10 +118,13 @@ class TestRecording(ShopCase):
     def test_sale_accumulates(self):
         sku = self.any_sku()
         day = metrics.biz_day(self.conn)
+        base = self.conn.execute(
+            "SELECT COALESCE(SUM(qty),0) FROM sales WHERE sku_id=? AND day=?",
+            (sku, day)).fetchone()[0]
         api.record_sale(sku, 4, 11, day)
         r = api.record_sale(sku, 6, 15, day)
         self.assertEqual(r["day"], day)
-        self.assertEqual(r["total"], 10)
+        self.assertEqual(r["total"], base + 10)
 
     def test_count_reconciles_and_is_idempotent(self):
         sku = self.any_sku()
