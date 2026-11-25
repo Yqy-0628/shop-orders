@@ -29,8 +29,8 @@ def state(tag):
     print(f"--- {tag}")
     print(f"    业务日        {metrics.biz_day()}")
     print(f"    订货留痕      {_q('SELECT COUNT(*) FROM decision_log')} 条")
-    print(f"    在途入库      {_q(chr(83)+'ELECT COUNT(*) FROM stock_move WHERE status=? ', '在途')} 条")
-    print(f"    已到货入库    {_q(chr(83)+'ELECT COUNT(*) FROM stock_move WHERE status=? ', '已到货')} 条")
+    print(f"    在途入库      {_q('SELECT COUNT(*) FROM stock_move WHERE status=?', '在途')} 条")
+    print(f"    已到货入库    {_q('SELECT COUNT(*) FROM stock_move WHERE status=?', '已到货')} 条")
 
 
 def reset(day):
