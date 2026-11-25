@@ -34,8 +34,8 @@ def data_issues(day: str | None = None) -> list[dict]:
     last = day or _last_day(conn)
     if not last:
         return [{"code": "no_data", "sku_id": "", "name": "",
-                 "message": "系统里还没有任何销售记录",
-                 "fix_hint": "先录一天销量", "severity": "block"}]
+                 "message": "尚无销售记录",
+                 "fix_hint": "补录一日销量", "severity": "block"}]
 
     out = []
     skus = [dict(r) for r in conn.execute("SELECT sku_id, name FROM sku")]
@@ -44,8 +44,8 @@ def data_issues(day: str | None = None) -> list[dict]:
     n = conn.execute("SELECT COUNT(*) FROM sales WHERE day=?", (last,)).fetchone()[0]
     if n == 0:
         out.append({"code": "no_data", "sku_id": "", "name": "",
-                    "message": f"{last} 没有任何销售记录",
-                    "fix_hint": "确认是否停业；若营业，请补录",
+                    "message": f"{last} 无销售记录",
+                    "fix_hint": "确认是否停业；营业中请补录",
                     "severity": "block"})
         return out
 
@@ -55,8 +55,8 @@ def data_issues(day: str | None = None) -> list[dict]:
             (last, CLOSE_H)):
         nm = next((s["name"] for s in skus if s["sku_id"] == r["sku_id"]), r["sku_id"])
         out.append({"code": "soldout_after_close", "sku_id": r["sku_id"], "name": nm,
-                    "message": f"售罄时刻记成了 {r['start_hour']}:00，晚于打烊",
-                    "fix_hint": "改成打烊前的时刻，或删掉这条",
+                    "message": f"售罄时刻 {r['start_hour']}:00 晚于打烊时间",
+                    "fix_hint": "改为打烊前时刻，或删除该记录",
                     "severity": "warn"})
 
     # ③ 库存耗尽了、却没有售罄标记 —— 很可能忘了点
@@ -85,8 +85,8 @@ def data_issues(day: str | None = None) -> list[dict]:
         if hist and r["q"] >= hist * 1.15:
             nm = next((s["name"] for s in skus if s["sku_id"] == r["sku_id"]), r["sku_id"])
             out.append({"code": "missing_soldout", "sku_id": r["sku_id"], "name": nm,
-                        "message": f"当天备的货卖完了（剩 {left}），但没记售罄",
-                        "fix_hint": "点「补录售罄」，把卖光的时刻补上",
+                        "message": f"当日余量 {left} 但未记录售罄",
+                        "fix_hint": "在收银页补记售罄时刻",
                         "severity": "warn"})
     return out
 
@@ -118,28 +118,28 @@ def today_tasks(day: str | None = None, limit: int = 3) -> list[dict]:
         if ratio >= HIGH_K:
             tasks.append(dict(
                 sku_id=sid, name=s["name"], type="high",
-                title=f"明天预计 {fc['value']} 件，比近月高 {(ratio-1)*100:.0f}%",
+                title=f"次日预计 {fc['value']} 件，高于近月均值 {(ratio-1)*100:.0f}%",
                 detail=f"近月日均 {recent:.0f}，区间 {fc['lo']}–{fc['hi']}",
                 severity="warn", weight=abs(ratio - 1)))
         elif ratio <= LOW_K:
             tasks.append(dict(
                 sku_id=sid, name=s["name"], type="low",
-                title=f"明天预计 {fc['value']} 件，比近月低 {(1-ratio)*100:.0f}%",
-                detail=f"近月日均 {recent:.0f}，要不要减量",
+                title=f"次日预计 {fc['value']} 件，低于近月均值 {(1-ratio)*100:.0f}%",
+                detail=f"近月日均 {recent:.0f}，建议评估减量",
                 severity="info", weight=abs(ratio - 1)))
 
         if streak >= STREAK:
             tasks.append(dict(
                 sku_id=sid, name=s["name"], type="soldout_streak",
-                title=f"已连续 {streak} 天卖光",
-                detail="基准值可能偏低，建议上调订货量",
+                title=f"连续 {streak} 天售罄",
+                detail="基准值偏低，建议上调订货量",
                 severity="warn", weight=0.5 + streak * 0.1))
 
         if waste >= 0.10:
             tasks.append(dict(
                 sku_id=sid, name=s["name"], type="waste_repeat",
-                title=f"近 7 天报了 {waste:.0%} 的货",
-                detail="基准值可能偏高，建议下调",
+                title=f"近 7 天报损率 {waste:.0%}",
+                detail="基准值偏高，建议下调订货量",
                 severity="warn", weight=waste))
 
     tasks.sort(key=lambda t: -t["weight"])

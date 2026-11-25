@@ -12,8 +12,8 @@ import ui
 ui.page("该订多少", "📦")
 ui.guard()
 
-st.title("📦 该订多少")
-st.caption("小店进货决策台")
+st.title("该订多少")
+st.caption("门店订货决策系统")
 
 try:
     st.switch_page("pages/1_今日.py")

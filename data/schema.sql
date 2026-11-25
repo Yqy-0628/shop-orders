@@ -17,7 +17,9 @@ CREATE TABLE sku (
   salvage         REAL NOT NULL,
   shelf_life_days INTEGER NOT NULL,
   mu              REAL NOT NULL,
-  sigma           REAL NOT NULL
+  sigma           REAL NOT NULL,
+  source          TEXT NOT NULL DEFAULT '自制',  -- 自制 / 进货：决定进订货清单还是备料清单
+  spec            TEXT                          -- 口味、规格等细分描述，可空
 );
 
 CREATE TABLE sales (
@@ -69,4 +71,12 @@ CREATE TABLE app_user (
   username TEXT PRIMARY KEY,
   pwd_hash TEXT NOT NULL,
   role     TEXT NOT NULL CHECK (role IN ('owner','clerk'))
+);
+
+-- 标签打印记录：记下每款最近一次印了多少，第二天打开默认沿用
+CREATE TABLE label_print (
+  id     INTEGER PRIMARY KEY AUTOINCREMENT,
+  day    TEXT NOT NULL,
+  sku_id TEXT NOT NULL REFERENCES sku(sku_id),
+  qty    INTEGER NOT NULL
 );

@@ -15,7 +15,7 @@ from datetime import date as _date, datetime, timedelta
 
 import json
 
-from . import connect, metrics, pipeline, review, rules, importer
+from . import connect, metrics, pipeline, review, rules, importer, auth
 
 
 def _today(d=None) -> str:
@@ -25,7 +25,7 @@ def _today(d=None) -> str:
 def _skus(conn):
     return [dict(r) for r in conn.execute(
         "SELECT sku_id, name, category, cost, price, salvage, mu, sigma, "
-        "shelf_life_days FROM sku ORDER BY sku_id")]
+        "shelf_life_days, source, spec FROM sku ORDER BY sku_id")]
 
 
 # ---------------------------------------------------------------- 数据异常
@@ -277,11 +277,140 @@ def day_review(day: str | None = None) -> list[dict]:
 
 # ---------------------------------------------------------------- 自动下单
 def auto_lines(day: str | None = None) -> list[dict]:
-    """不需要老板拍板、按常规量自动下的品类。"""
+    """按常规量排出的全部备货量，页面之外也用得到。"""
     day = _today(day)
     conn = connect()
-    return [{"sku_id": s["sku_id"], "name": s["name"],
-             "qty": round(float(s["mu"]))} for s in _skus(conn)[3:]]
+    return [{"sku_id": s["sku_id"], "name": s["name"], "source": s["source"],
+             "qty": round(float(s["mu"])), "price": s["price"]} for s in _skus(conn)]
+
+
+# ---------------------------------------------------------------- 订货清单
+def order_list(day: str | None = None) -> dict:
+    """明天的备货清单，按「进货」「自制」分开。
+
+    进货的发给供货商，自制的交给后厨排产。系统不下单，只给量。
+    返回 {"day", "purchase": [...], "make": [...], "summary"}，
+    每项 {sku_id, name, category, spec, qty, price}
+    """
+    day = _today(day)
+    conn = connect()
+    wd = datetime.strptime(day, "%Y-%m-%d").weekday()
+    out = {"day": day, "purchase": [], "make": []}
+    for s in _skus(conn):
+        try:
+            q = int(pipeline.suggest_sku(s["sku_id"], wd, conn)["tiers"][1]["qty"])
+        except Exception:
+            q = int(round(float(s["mu"] or 0)))
+        item = {"sku_id": s["sku_id"], "name": s["name"], "category": s["category"],
+                "spec": s["spec"] or "", "qty": q, "price": float(s["price"])}
+        out["purchase" if s["source"] == "进货" else "make"].append(item)
+    out["summary"] = {
+        "purchase_kinds": len(out["purchase"]), "purchase_qty": sum(x["qty"] for x in out["purchase"]),
+        "make_kinds": len(out["make"]), "make_qty": sum(x["qty"] for x in out["make"]),
+    }
+    return out
+
+
+def order_csv(kind: str = "purchase", day: str | None = None) -> bytes:
+    """把清单导成 CSV，店长直接发给供货商或后厨。"""
+    import csv
+    import io
+
+    data = order_list(day)
+    rows = data["purchase"] if kind == "purchase" else data["make"]
+    buf = io.StringIO()
+    w = csv.writer(buf)
+    title = "进货单" if kind == "purchase" else "自制排产单"
+    w.writerow([title, data["day"]])
+    w.writerow(["品名", "规格", "数量", "单位"])
+    for x in rows:
+        w.writerow([x["name"], x["spec"] or "-", x["qty"], "件"])
+    w.writerow(["合计", "", sum(x["qty"] for x in rows), "件"])
+    return ("\ufeff" + buf.getvalue()).encode("utf-8")
+
+
+# ---------------------------------------------------------------- 标签打印量
+def label_plan(day: str | None = None) -> dict:
+    """每款最近一次印的数量，第二天打开默认沿用。返回 {sku_id: qty}。"""
+    conn = connect()
+    out = {}
+    for r in conn.execute(
+            "SELECT sku_id, qty FROM label_print ORDER BY id DESC"):
+        out.setdefault(r["sku_id"], int(r["qty"]))
+    return out
+
+
+def save_label_plan(plan: dict, day: str | None = None) -> dict:
+    """记住这一批打印量。plan 只记大于 0 的款。"""
+    day = _today(day)
+    conn = connect()
+    conn.execute("DELETE FROM label_print WHERE day=?", (day,))
+    n = 0
+    for sku_id, qty in plan.items():
+        if int(qty) > 0:
+            conn.execute("INSERT INTO label_print (day, sku_id, qty) VALUES (?,?,?)",
+                         (day, sku_id, int(qty)))
+            n += 1
+    conn.commit()
+    return {"ok": True, "day": day, "skus": n}
+
+
+# ---------------------------------------------------------------- 收银结账
+def checkout(cart: list, hour: int | None = None, day: str | None = None) -> dict:
+    """一单结账。cart 是 [(sku_id, 件数), ...]，按档案价成交，一次写库。"""
+    day = _today(day)
+    conn = connect()
+    h = max(9, min(21, int(hour or datetime.now().hour)))
+    wd = datetime.strptime(day, "%Y-%m-%d").weekday()
+    amount = 0.0
+    items = 0
+    for sku_id, qty in cart:
+        qty = int(qty)
+        if qty <= 0:
+            continue
+        row = conn.execute("SELECT price, name FROM sku WHERE sku_id=?", (sku_id,)).fetchone()
+        if row is None:
+            raise KeyError(f"没有这个商品: {sku_id}")
+        conn.execute(
+            "INSERT INTO sales (sku_id, day, hour, weekday, qty, unit_price) "
+            "VALUES (?,?,?,?,?,?)",
+            (sku_id, day, h, wd, qty, row["price"]))
+        amount += qty * float(row["price"])
+        items += qty
+    conn.commit()
+    return {"ok": True, "day": day, "items": items, "amount": amount,
+            "hour": h, "lines": len(cart)}
+
+
+# ---------------------------------------------------------------- 商品档案维护
+def sku_rows(role: str = "owner") -> list[dict]:
+    """商品档案列表。店员看不到进价与残值，查询层就不返回。"""
+    conn = connect()
+    rows = [dict(r) for r in conn.execute(
+        "SELECT sku_id, barcode, name, category, cost, price, salvage, "
+        "shelf_life_days, mu, source, spec FROM sku ORDER BY category, sku_id")]
+    if role != "owner":
+        for r in rows:
+            r.pop("cost", None)
+            r.pop("salvage", None)
+            r.pop("mu", None)
+    return rows
+
+
+def set_sku_meta(sku_id: str, source: str | None = None,
+                 spec: str | None = None) -> dict:
+    """改商品的来源（自制/进货）与规格备注，决定它进哪张清单。"""
+    conn = connect()
+    if conn.execute("SELECT 1 FROM sku WHERE sku_id=?", (sku_id,)).fetchone() is None:
+        raise KeyError(f"没有这个商品: {sku_id}")
+    if source:
+        if source not in ("自制", "进货"):
+            raise ValueError("来源只能是「自制」或「进货」")
+        conn.execute("UPDATE sku SET source=? WHERE sku_id=?", (source, sku_id))
+    if spec is not None:
+        conn.execute("UPDATE sku SET spec=? WHERE sku_id=?", (spec.strip() or None, sku_id))
+    conn.commit()
+    return {"ok": True, "sku_id": sku_id}
 
 
 # ---------------------------------------------------------------- 商品档案维护
@@ -320,6 +449,19 @@ def update_sku(sku_id: str, cost: float | None = None, price: float | None = Non
         (new["cost"], new["price"], new["salvage"], new["shelf_life_days"], sku_id))
     conn.commit()
     return {"ok": True, "sku_id": sku_id, **new}
+
+
+# ---------------------------------------------------------------- 账号
+def change_password(username: str, old: str, new: str) -> dict:
+    """用户改自己的口令；旧口令不对或新口令不合规抛 ValueError。"""
+    auth.change_password(connect(), username, old, new)
+    return {"ok": True}
+
+
+def reset_password(username: str, new: str) -> dict:
+    """店主给店员重置口令。"""
+    auth.reset_password(connect(), username, new)
+    return {"ok": True}
 
 
 # ---------------------------------------------------------------- 数据导入
@@ -387,11 +529,11 @@ def day_close(day: str | None = None) -> dict:
         n_in = left + sold.get(r["sku_id"], 0) + waste.get(r["sku_id"], 0)
         mu_v = mu.get(r["sku_id"], 0) or 1
         if left < 0:
-            flag = "账不平"
+            flag = "账实不符"
         elif left >= mu_v * 0.5:
-            flag = "剩不少"
+            flag = "剩余偏多"
         elif hour.get(r["sku_id"], 24) <= 13 and left <= 0:
-            flag = "早卖光"
+            flag = "提前售罄"
         else:
             flag = "正常"
         rows.append({
@@ -411,19 +553,22 @@ def day_close(day: str | None = None) -> dict:
     }
     tips = []
     if summary["sold"] == 0:
-        tips.append("这天没有任何销售记录，先确认是不是停业")
+        tips.append("当日无销售记录，请确认门店是否营业")
         return {"summary": summary, "rows": rows, "tips": tips}
     if summary["in"] and summary["sold"] < summary["in"] * 0.1:
-        tips.append(f"这天只录了 {summary['sold']} 件，不到进货的 "
-                    f"{summary['sold'] / summary['in']:.0%}，账还没结完，不算「剩不少」")
+        for x in rows:
+            if x["flag"] in ("剩余偏多", "提前售罄"):
+                x["flag"] = "账未结清"
+        tips.append(f"当日仅记录 {summary['sold']} 件，为进货量的 "
+                    f"{summary['sold'] / summary['in']:.0%}，账目未结清，剩余与售罄暂不判定")
     else:
-        off = [x for x in rows if x["flag"] == "账不平"]
+        off = [x for x in rows if x["flag"] == "账实不符"]
         if off:
-            tips.append(f"{len(off)} 个品类账算成了负数，流水有漏记，去「记录 · 盘点」核一下")
-        hi = [x for x in rows if x["flag"] == "剩不少"]
+            tips.append(f"{len(off)} 个品类账面为负，存在漏记，建议盘点核对")
+        hi = [x for x in rows if x["flag"] == "剩余偏多"]
         if hi:
-            tips.append(f"{len(hi)} 个品类临收工还剩不少（{hi[0]['name']} 等），明天可以少做一点")
-        early = [x for x in rows if x["flag"] == "早卖光"]
+            tips.append(f"{len(hi)} 个品类收工时剩余偏多（{hi[0]['name']} 等），次日可适度减量")
+        early = [x for x in rows if x["flag"] == "提前售罄"]
         if early:
-            tips.append(f"{len(early)} 个品类 13 点前就卖光（{early[0]['name']} 等），明天可以多做一点")
+            tips.append(f"{len(early)} 个品类 13 点前售罄（{early[0]['name']} 等），次日可适度增量")
     return {"summary": summary, "rows": rows, "tips": tips}

@@ -1,5 +1,5 @@
 # -*- coding: utf-8 -*-
-"""今日：先看数据有没有问题，再看今天要决定什么，其余自动下单。"""
+"""今日：数据异常、收工账、待决事项、订货清单。"""
 import sys
 from pathlib import Path
 
@@ -8,74 +8,83 @@ import streamlit as st
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 import ui
-from core.api import data_issues, today_tasks, auto_lines, day_close
+from core.api import data_issues, today_tasks, day_close, order_list, order_csv
 
 ui.page("今日", "☀️")
 user = ui.guard()
 
-st.title("☀️ 今天")
-st.caption(f"{ui.ROLE_CN[user['role']]}视角 · 先看数据，再看决定")
+close = day_close()
+st.title("今日")
+st.caption(f"业务日 {close['summary']['day']}　{ui.ROLE_CN[user['role']]}")
 
 # ---------------------------------------------------------------- 数据异常
 issues = data_issues()
 if issues:
-    st.subheader(f"⚠️ 有 {len(issues)} 条数据要你确认")
-    st.caption("不处理的话，今天的预测会算错")
+    st.subheader(f"数据异常　{len(issues)} 项")
     for it in issues:
         with st.container(border=True):
             c1, c2 = st.columns([4, 1])
             c1.markdown(f"**{it['name']}**　{it['message']}")
-            c1.caption(f"→ {it['fix_hint']}")
-            if c2.button("去处理", key=f"fix_{it['sku_id']}"):
+            c1.caption(it["fix_hint"])
+            if c2.button("处理", key=f"fix_{it['sku_id']}"):
                 st.session_state["sku_id"] = it["sku_id"]
                 st.switch_page("pages/3_记录.py")
-    st.divider()
 
-# ---------------------------------------------------------------- 收工日报
-close = day_close()
+# ---------------------------------------------------------------- 收工账
 sm = close["summary"]
-st.subheader(f"🧾 {sm['day']} 收工账")
+st.subheader("收工账")
 c1, c2, c3, c4 = st.columns(4)
-c1.metric("进了", f"{sm['in']:,} 件")
-c2.metric("卖了", f"{sm['sold']:,} 件")
-c3.metric("报损", f"{sm['waste']:,} 件")
-c4.metric("收工还剩", f"{sm['left']:,} 件")
+c1.metric("进货", f"{sm['in']:,}")
+c2.metric("售出", f"{sm['sold']:,}")
+c3.metric("报损", f"{sm['waste']:,}")
+c4.metric("剩余", f"{sm['left']:,}")
 
 for tip in close["tips"]:
     st.warning(tip)
 
-with st.expander(f"按品类看这天的账（{sm['skus']} 个）", expanded=False):
+with st.expander("按品类明细"):
     st.dataframe(
-        [{"品类": r["name"], "进": r["in"], "卖": r["sold"], "报损": r["waste"],
-          "收工剩": r["left"],
-          "卖光时刻": f"{r['hour']}:00" if r["hour"] else "没卖光",
-          "提示": "" if r["flag"] == "正常" else r["flag"]}
+        [{"品类": r["name"], "进货": r["in"], "售出": r["sold"], "报损": r["waste"],
+          "剩余": r["left"],
+          "售罄时间": f"{r['hour']}:00" if r["hour"] else "—",
+          "状态": r["flag"]}
          for r in close["rows"]],
         width="stretch", hide_index=True)
-    st.caption("「剩不少」是明天该少做的信号，「账不平」是流水漏记、要去盘点。")
-
-st.divider()
 
 # ---------------------------------------------------------------- 待决事项
 tasks = today_tasks()
+st.subheader(f"待决事项　{len(tasks)} 项")
 if tasks:
-    st.subheader(f"📌 今天要你决定的 {len(tasks)} 件事")
-    st.caption("其余的上百件，系统按常规量处理，不打扰你")
     for t in tasks:
         with st.container(border=True):
             c1, c2 = st.columns([4, 1])
             c1.markdown(f"**{t['name']}**　{t['title']}")
             c1.caption(t["detail"])
-            if c2.button("去订货", key=f"go_{t['sku_id']}", type="primary"):
+            if c2.button("提单", key=f"go_{t['sku_id']}", type="primary"):
                 st.session_state["sku_id"] = t["sku_id"]
                 st.switch_page("pages/2_订货.py")
 else:
-    st.success("今天没有需要你拍板的事，其余品类已按常规量自动下单。")
+    st.success("无待决事项，全部品类按常规量执行。")
 
-# ---------------------------------------------------------------- 自动下单
-lines = auto_lines()
-with st.expander(f"已自动下单 {len(lines)} 个品类（不用你确认）"):
+# ---------------------------------------------------------------- 订货清单
+lines = order_list()
+st.subheader("次日备货清单")
+st.caption("系统只给建议量，不下单；导出后发给供货商或后厨")
+t1, t2 = st.tabs([f"需进货 {lines['summary']['purchase_kinds']} 款 · "
+                  f"{lines['summary']['purchase_qty']} 件",
+                  f"自制 {lines['summary']['make_kinds']} 款 · "
+                  f"{lines['summary']['make_qty']} 件"])
+with t1:
     st.dataframe(
-        [{"品类": x["name"], "建议量": x["qty"]} for x in lines],
-        width="stretch", hide_index=True,
-    )
+        [{"品名": x["name"], "规格": x["spec"] or "—", "建议量": x["qty"]}
+         for x in lines["purchase"]],
+        width="stretch", hide_index=True)
+    st.download_button("导出进货单（CSV）", order_csv("purchase"),
+                       f"进货单_{lines['day']}.csv", "text/csv")
+with t2:
+    st.dataframe(
+        [{"品名": x["name"], "规格": x["spec"] or "—", "建议量": x["qty"]}
+         for x in lines["make"]],
+        width="stretch", hide_index=True)
+    st.download_button("导出自制排产单（CSV）", order_csv("make"),
+                       f"排产单_{lines['day']}.csv", "text/csv")
