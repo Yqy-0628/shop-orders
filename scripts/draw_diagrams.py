@@ -69,35 +69,38 @@ def chip(d, right, y, s, fill, fg):
 
 
 def draw_ipo():
-    W, H = 1680, 1030
+    W, H = 1680, 1220
     img = Image.new("RGB", (W, H), WHITE)
     d = ImageDraw.Draw(img)
 
-    d.text((70, 34), "IPO 模型：订货决策系统的八页实现", font=f(FB, 40), fill=NAVY)
+    d.text((70, 34), "IPO 模型：订货决策系统的八个页面", font=f(FB, 40), fill=NAVY)
     d.text((72, 90), "输入 → 处理 → 输出　三列是整体映射，不是逐行对应；框右上角标的是它落在哪一页",
            font=f(FR, 18), fill=GREY)
 
-    CW, CH, GAP = 460, 122, 152
+    CW, CH, GAP = 460, 112, 138
     TOP, HEAD = 160, 84
 
     cols = [
-        dict(x=70, title="输入 INPUT", note="三个入口页：收银、记录、设置",
+        dict(x=70, title="输入 INPUT", note="四个入口：收银、导入、收银台账、设置",
              fill=(236, 243, 250), edge=BLUE, chipbg=(219, 231, 247),
-             items=[("扫码流水", "码 → 单品 × 件数 × 时段", "收银页"),
-                    ("到货与报损", "入库 / 在途 / 报损 / 盘点", "记录页"),
-                    ("售罄标记", "哪一款、几点卖光（一键）", "记录页"),
-                    ("商品档案", "进价 / 售价 / 残值 / 保质期", "设置页")]),
+             items=[("结账流水", "扫码入单，或导入历史销售 CSV", "收银 · 导入"),
+                    ("售罄标记", "哪一款、几点卖光（一键）", "收银页"),
+                    ("到货与报损", "入库 / 在途 / 报损 / 盘点", "收银·台账"),
+                    ("商品档案", "分类 / 自制或进货 / 进价售价 / 供货商", "导入 · 设置"),
+                    ("打印记录", "每款上次打了多少枚，次日沿用", "标签页")]),
         dict(x=610, title="处理 PROCESS", note="每天重算：μ → Q* → 建议 → 明日实测 → 回到 μ",
              fill=(240, 247, 240), edge=(58, 118, 78), chipbg=(226, 240, 228),
              items=[("需求补齐", "卖光后的缺口 × 同期时段销量率，还原真实需求", "core/pipeline"),
                     ("基线 + 趋势", "同星期几均值 × 近期趋势 → μ（均值）", "core/pipeline"),
                     ("报童模型", "临界比 → z　　Q* = μ + z·σ", "core/order"),
-                    ("分档与诊断", "数据就绪度三档 + 品类订货偏差", "core/readiness")]),
-        dict(x=1150, title="输出 OUTPUT", note="四个界面：每一框都能在屏幕上点到",
+                    ("分档与诊断", "数据就绪度三档 + 品类订货偏差", "core/readiness"),
+                    ("日结判定", "账实不符 / 剩余偏多 / 提前售罄 + 次日清单", "core/close")]),
+        dict(x=1150, title="输出 OUTPUT", note="五个界面：每一框都能在屏幕上点到",
              fill=(252, 244, 236), edge=GOLD, chipbg=(248, 232, 213),
-             items=[("建议订货量", "保守 / 正常 / 积极 + 报童最优量 Q*", "订货页"),
+             items=[("备货清单", "进货按供货商分组导出，自制出排产单", "今日页"),
+                    ("建议订货量", "保守 / 正常 / 积极 + 报童最优量 Q*", "订货页"),
                     ("错在哪（复盘）", "按建议订会差多少：省多少、代价怎么换", "复盘页"),
-                    ("经营看板", "卖了多少 vs 进了多少、品类偏差、三件事", "看板页"),
+                    ("经营看板", "卖了多少 vs 进了多少、品类偏差", "看板页"),
                     ("标签与条码", "打印标签 → 扫码收银 → 回到输入", "标签页")]),
     ]
 
@@ -114,14 +117,14 @@ def draw_ipo():
             chip(d, x + CW - 12, by + CH - 30, page, c["chipbg"], GREY)
 
     # 两条大箭头：表达“整列流向整列”，而不是逐行对应
-    ay = TOP + HEAD + 16 + CH // 2 + GAP
+    ay = 560
     for x in (534, 1074):
         d.line([(x, ay), (x + 52, ay)], fill=BLUE, width=6)
         d.polygon([(x + 52, ay - 15), (x + 72, ay), (x + 52, ay + 15)], fill=BLUE)
 
     # 反馈回边：决策留痕与实际销量回灌成样本
-    bottom = TOP + HEAD + 16 + 3 * GAP + CH
-    ry = bottom + 62
+    bottom = TOP + HEAD + 16 + 5 * GAP + CH
+    ry = bottom + 70
     d.line([(1150 + CW / 2, bottom), (1150 + CW / 2, ry)], fill=(58, 118, 78), width=4)
     d.line([(1150 + CW / 2, ry), (300, ry)], fill=(58, 118, 78), width=4)
     d.line([(300, ry), (300, bottom + 4)], fill=(58, 118, 78), width=4)
@@ -141,11 +144,11 @@ def draw_ipo():
 
 # ---------------------------------------------------------------- ER
 def draw_er():
-    W, H = 1700, 1010
+    W, H = 1700, 1050
     img = Image.new("RGB", (W, H), WHITE)
     d = ImageDraw.Draw(img)
 
-    d.text((70, 36), "数据模型：六张表", font=f(FB, 40), fill=NAVY)
+    d.text((70, 36), "数据模型：七张表", font=f(FB, 40), fill=NAVY)
     d.text((72, 92), "库存是派生量，事实是每一次增减；不单独建库存表",
            font=f(FR, 19), fill=GREY)
 
@@ -161,15 +164,19 @@ def draw_er():
                                       ("type 入库/报损/盘点", ""), ("qty 数量（±）", ""),
                                       ("unit_cost 进价", ""), ("status 在途/已到货", "")]),
         "sku": (660, 150, 430, [("sku_id", "PK"), ("barcode 条码", "U"), ("name 品名", ""),
-                                ("category 品类", ""), ("cost 进价", ""), ("price 售价", ""),
+                                ("category 品类", ""), ("spec 规格", ""),
+                                ("source 自制/进货", ""), ("supplier 供货商", ""),
+                                ("cost 进价", ""), ("price 售价", ""),
                                 ("salvage 残值", ""), ("shelf_life 保质期", ""),
                                 ("mu / sigma 均值方差", "")]),
-        "decision_log": (660, 540, 430, [("id", "PK"), ("ts 时间", ""),
+        "decision_log": (660, 590, 430, [("id", "PK"), ("ts 时间", ""),
                                          ("username 操作人", "FK"), ("sku_id", "FK"),
                                          ("params_json 参数", ""), ("q_star 建议量", ""),
                                          ("adopted_qty 实际订", ""), ("adopted 采纳", "")]),
         "app_user": (1210, 150, 380, [("username", "PK"), ("pwd_hash 密码哈希", ""),
                                       ("role 角色", "")]),
+        "label_print": (1210, 380, 380, [("id", "PK"), ("day 日期", ""),
+                                         ("sku_id", "FK"), ("qty 打印量", "")]),
     }
 
     geo = {}
@@ -208,19 +215,26 @@ def draw_er():
     arrow(d, (sx + sw / 2, sy + sh), (dx + dw / 2, dy), color=LINE, w=3, head=10)
     d.text((sx + sw / 2 + 12, (sy + sh + dy) / 2 - 24), "1 : N", font=f(FB, 16), fill=BLUE)
 
-    box(d, (1210, 380, 1590, 720), (250, 251, 253), LINE)
-    d.text((1230, 398), "设计要点", font=f(FB, 19), fill=NAVY)
+    lx, ly, lw, lh = geo["label_print"]
+    arrow(d, (sx + sw, sy + sh * 0.62), (lx, ly + lh / 2), color=LINE, w=3, head=10)
+    d.text(((sx + sw + lx) / 2 - 4, sy + sh * 0.62 - 30), "1 : N", font=f(FB, 16), fill=BLUE)
+
+    box(d, (1210, 610, 1590, 1030), (250, 251, 253), LINE)
+    d.text((1230, 628), "设计要点", font=f(FB, 19), fill=NAVY)
     notes = ["· 外键全部指向 sku(sku_id)",
              "· 库存不落表，由流水实时重算",
              "· 报损记在 stock_move，qty 为负",
              "· 在途订单 status='在途'，不进库存",
-             "· 决策留痕：谁、建议多少、实际订多少"]
+             "· 决策留痕：谁、建议多少、实际订多少",
+             "· sku.source 区分自制/进货，决定进哪张单",
+             "· sku.supplier 让进货单按家分组，直接转发",
+             "· label_print 记住每款上次打印量，次日沿用"]
     for i, s in enumerate(notes):
-        d.text((1230, 434 + i * 32), s, font=f(FR, 16), fill=GREY)
+        d.text((1230, 664 + i * 30), s, font=f(FR, 16), fill=GREY)
 
-    d.text((1230, 620), "售罄标记是灵魂表：", font=f(FB, 17), fill=ACCENT)
-    d.text((1230, 648), "没有它，需求永远是残缺的。", font=f(FR, 16), fill=ACCENT)
-    d.text((1230, 690), "两套真相 → 早晚对不上。", font=f(FR, 15), fill=GREY)
+    d.text((1230, 930), "售罄标记是灵魂表：", font=f(FB, 17), fill=ACCENT)
+    d.text((1230, 958), "没有它，需求永远是残缺的。", font=f(FR, 16), fill=ACCENT)
+    d.text((1230, 988), "两套真相 → 早晚对不上。", font=f(FR, 15), fill=GREY)
 
     img.save(OUT / "er.png")
     print("er.png")
@@ -228,7 +242,7 @@ def draw_er():
 
 # ---------------------------------------------------------------- 流程
 def draw_flow():
-    W, H = 1700, 860
+    W, H = 1700, 920
     img = Image.new("RGB", (W, H), WHITE)
     d = ImageDraw.Draw(img)
 
@@ -246,10 +260,10 @@ def draw_flow():
         for i, s in enumerate(subs):
             d.text((x + 14, y + 40 + i * 21), s, font=fs, fill=GREY)
 
-    node(60, 150, "① 进货入库", ["到货量、进价"], GREYF, GREY)
+    node(60, 150, "① 建档与到货", ["商品档案 → 分类/来源/价格", "到货量、进价入账"], GREYF, GREY)
     node(420, 150, "② 顾客要买", ["扫一件标签码"], GREYF, GREY)
     node(780, 150, "③ 还有货吗？", ["库存 > 0"], WHITE, BLUE)
-    node(1140, 150, "④ 开单扣库存", ["成交，记一条销售"], GREYF, GREY)
+    node(1140, 150, "④ 开单扣库存", ["按档案价成交，记销售"], GREYF, GREY)
 
     node(60, 380, "⑨ 报损登记", ["过期 / 损坏"], GREYF, GREY, dash=True)
     node(420, 380, "⑥ 需求补齐", ["缺货时长 × 同期时段率"], LIGHT, BLUE)
@@ -281,8 +295,8 @@ def draw_flow():
     d.text((1092, 398), "汇总", font=f(FR, 14), fill=GOLD)
 
     # 次日到货，回到 ①
-    d.line([(1440, 646), (1580, 646), (1580, 108), (210, 108)], fill=LINE, width=3)
-    arrow(d, (210, 108), (210, 144))
+    d.line([(1440, 646), (1580, 646), (1580, 130), (210, 130)], fill=LINE, width=3)
+    arrow(d, (210, 130), (210, 146))
     d.text((1596, 640), "次日", font=f(FB, 16), fill=GREY)
     d.text((1596, 664), "到货", font=f(FR, 14), fill=GREY)
 
@@ -291,6 +305,9 @@ def draw_flow():
     d.text((84, 744), "整个项目只做一件事：", font=f(FB, 20), fill=NAVY)
     d.text((300, 742), "销量只记录成交，卖光的那几小时是空白；把空白补上，需求才第一次看得见。",
            font=f(FR, 21), fill=NAVY)
+
+    d.text((84, 838), "建档在导入页：一次建完全部商品（分类、自制还是进货、进价售价、供货商），"
+                      "① 的到货口径与 ④ 的成交价都由它来。", font=f(FR, 15), fill=GREY)
 
     img.save(OUT / "flow.png")
     print("flow.png")
