@@ -15,7 +15,7 @@ from datetime import date as _date, datetime, timedelta
 
 import json
 
-from . import connect, metrics, pipeline, review, rules, importer, auth
+from . import connect, metrics, pipeline, review, rules, importer, auth, catalog
 
 
 def _today(d=None) -> str:
@@ -500,6 +500,29 @@ def import_reconcile(day_from: str, day_to: str) -> dict:
 
 def import_template() -> bytes:
     return importer.template_csv()
+
+
+# ---------------------------------------------------------------- 商品档案导入
+def catalog_template() -> bytes:
+    return catalog.template_csv()
+
+
+def catalog_read(raw: bytes) -> dict:
+    """读商品档案表，返回表头、数据行与猜出的字段。"""
+    headers, rows = importer.read_bytes(raw)
+    return {"headers": headers, "rows": rows, "guess": catalog.guess(headers)}
+
+
+def catalog_check(headers: list, rows: list) -> dict:
+    """逐行校验商品档案，不写库。"""
+    mapping = catalog.guess(headers)
+    ok, bad = catalog.check(headers, rows, mapping)
+    return {"ok": ok, "bad": bad,
+            "missing": [k for k in catalog.REQUIRED if k not in mapping]}
+
+
+def catalog_commit(ok_rows: list) -> dict:
+    return catalog.commit(ok_rows)
 
 
 # ---------------------------------------------------------------- 收工日报
