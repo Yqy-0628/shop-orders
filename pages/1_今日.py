@@ -8,7 +8,8 @@ import streamlit as st
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 import ui
-from core.api import data_issues, today_tasks, day_close, order_list, order_csv
+from core.api import (data_issues, today_tasks, day_close, order_list, order_csv,
+                     pending_arrivals)
 
 ui.page("今日", "☀️")
 user = ui.guard()
@@ -37,7 +38,7 @@ c1, c2, c3, c4 = st.columns(4)
 c1.metric("进货", f"{sm['in']:,}")
 c2.metric("售出", f"{sm['sold']:,}")
 c3.metric("报损", f"{sm['waste']:,}")
-c4.metric("剩余", f"{sm['left']:,}")
+c4.metric("剩余", "未录进货" if sm.get("no_stock") else f"{sm['left']:,}")
 
 for tip in close["tips"]:
     st.warning(tip)
@@ -50,6 +51,19 @@ with st.expander("按品类明细"):
           "状态": r["flag"]}
          for r in close["rows"]],
         width="stretch", hide_index=True)
+
+# ---------------------------------------------------------------- 待确认到货
+pend = pending_arrivals()
+if pend:
+    qty_all = sum(x["qty"] for x in pend)
+    st.subheader(f"待确认到货　{len(pend)} 单 · {qty_all} 件")
+    c1, c2 = st.columns([4, 1])
+    c1.dataframe(
+        [{"到货日": x["day"], "品名": x["name"],
+          "应到": x["qty"], "来货方": x["supplier"] or "自制"} for x in pend],
+        width="stretch", hide_index=True)
+    if c2.button("确认到货", key="go_arrival", type="primary", width="stretch"):
+        st.switch_page("pages/7_收银.py")
 
 # ---------------------------------------------------------------- 待决事项
 tasks = today_tasks()

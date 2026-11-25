@@ -325,6 +325,27 @@ def order_list(day: str | None = None) -> dict:
     return out
 
 
+def pending_arrivals(day: str | None = None) -> list[dict]:
+    """订了还没到的入库单。day 留空就查全部，按到货日排。
+
+    返回 [{day, sku_id, name, spec, supplier, source, qty, amount}]
+    """
+    conn = connect()
+    sql = ("SELECT m.day, m.sku_id, m.qty, m.unit_cost, "
+           "s.name, s.spec, s.supplier, s.source, s.category "
+           "FROM stock_move m JOIN sku s ON s.sku_id=m.sku_id "
+           "WHERE m.status='在途' AND m.type='入库'")
+    args = ()
+    if day:
+        sql += " AND m.day=?"
+        args = (day,)
+    rows = conn.execute(sql + " ORDER BY m.day, s.category, m.sku_id", args).fetchall()
+    return [{"day": r["day"], "sku_id": r["sku_id"], "name": r["name"],
+             "spec": r["spec"] or "", "supplier": (r["supplier"] or "").strip(),
+             "source": r["source"], "qty": int(r["qty"]),
+             "amount": int(r["qty"]) * float(r["unit_cost"] or 0)} for r in rows]
+
+
 def order_csv(kind: str = "purchase", day: str | None = None,
               supplier: str | None = None) -> bytes:
     """把清单导成 CSV，店长直接发给供货商或后厨。
@@ -612,6 +633,15 @@ def day_close(day: str | None = None) -> dict:
         "skus": len(rows),
     }
     tips = []
+    no_stock = summary["in"] == 0
+    summary["no_stock"] = no_stock
+    if no_stock:
+        # 店家第一次导入多半只有销售流水，没有进货登记。
+        # 这时候余额必然是负数，但不能说成「账实不符」，只能说进货没录。
+        for x in rows:
+            x["flag"] = "未录进货"
+        tips.append("当天没有进货登记，剩余与售罄不作判定")
+        return {"summary": summary, "rows": rows, "tips": tips}
     if summary["sold"] == 0:
         tips.append("当日无销售记录，请确认门店是否营业")
         return {"summary": summary, "rows": rows, "tips": tips}

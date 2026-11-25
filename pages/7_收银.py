@@ -119,16 +119,31 @@ with st.expander("台账登记　补录销量 / 到货 / 报损 / 盘点"):
                 r = api.record_sale(labels[pick], int(qty), int(when))
                 st.success(f"{pick.split()[1]} 当日累计 {r['total']} 件")
     with t2:
-        with st.form("arrival"):
-            pick = st.selectbox("商品", list(labels.keys()), index=idx, key="a_sku")
-            qty = st.number_input("实收数量", 0, 999, 30)
-            if st.form_submit_button("确认到货", width="stretch"):
-                r = api.record_arrival(labels[pick], int(qty))
-                nm = pick.split()[1]
-                if r["diff"]:
-                    st.warning(f"{nm} 应到 {r['expected']}，实收 {qty}，差 {r['diff']:+d} 件")
-                else:
-                    st.success(f"{nm} 到货 {qty} 件")
+        pend = api.pending_arrivals(day) or api.pending_arrivals()
+        if pend:
+            keys = [f"{x['name']}　应到 {x['qty']} 件　{x['day']}" for x in pend]
+            with st.form("arrival"):
+                pick = st.selectbox("在途单", keys, key="a_pick")
+                it = pend[keys.index(pick)]
+                qty = st.number_input("实收数量", 0, 999, it["qty"])
+                if st.form_submit_button("确认到货", width="stretch"):
+                    r = api.record_arrival(it["sku_id"], int(qty), day=it["day"])
+                    if r["diff"]:
+                        st.warning(f"{it['name']} 应到 {r['expected']}，实收 {qty}，"
+                                   f"差 {r['diff']:+d} 件（已留痕）")
+                    else:
+                        st.success(f"{it['name']} 到货 {qty} 件")
+        else:
+            with st.form("arrival"):
+                pick = st.selectbox("商品", list(labels.keys()), index=idx, key="a_sku")
+                qty = st.number_input("实收数量", 0, 999, 30)
+                if st.form_submit_button("确认到货", width="stretch"):
+                    r = api.record_arrival(labels[pick], int(qty))
+                    nm = pick.split()[1]
+                    if r["diff"]:
+                        st.warning(f"{nm} 应到 {r['expected']}，实收 {qty}，差 {r['diff']:+d} 件")
+                    else:
+                        st.success(f"{nm} 到货 {qty} 件")
     with t3:
         with st.form("waste"):
             pick = st.selectbox("商品", list(labels.keys()), index=idx, key="w_sku")
