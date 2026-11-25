@@ -28,7 +28,7 @@ if issues:
             c1.caption(it["fix_hint"])
             if c2.button("处理", key=f"fix_{it['sku_id']}"):
                 st.session_state["sku_id"] = it["sku_id"]
-                st.switch_page("pages/3_记录.py")
+                st.switch_page("pages/7_收银.py")
 
 # ---------------------------------------------------------------- 收工账
 sm = close["summary"]

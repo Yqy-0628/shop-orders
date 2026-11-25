@@ -98,3 +98,48 @@ with st.form("soldout"):
             sku_id = pick.split()[0]
             api.record_soldout(sku_id, int(hour))
             st.success(f"{names[sku_id]['name']} 记为 {int(hour)}:00 售罄")
+
+# ---------------------------------------------------------------- 台账登记
+st.divider()
+with st.expander("台账登记　补录销量 / 到货 / 报损 / 盘点"):
+    sku_all = [dict(r) for r in connect().execute(
+        "SELECT sku_id, name, spec FROM sku ORDER BY sku_id")]
+    labels = {f"{r['sku_id']} {r['name']}" + (f" {r['spec']}" if r["spec"] else ""): r["sku_id"]
+              for r in sku_all}
+    default = st.session_state.get("sku_id", sku_all[0]["sku_id"])
+    idx = next((i for i, v in enumerate(labels.values()) if v == default), 0)
+
+    t1, t2, t3, t4 = st.tabs(["补录销量", "到货登记", "报损登记", "盘点校正"])
+    with t1:
+        with st.form("sale"):
+            pick = st.selectbox("商品", list(labels.keys()), index=idx, key="x_sku")
+            qty = st.number_input("件数", 1, 999, 5)
+            when = st.slider("时段", 9, 21, 14)
+            if st.form_submit_button("记录", width="stretch"):
+                r = api.record_sale(labels[pick], int(qty), int(when))
+                st.success(f"{pick.split()[1]} 当日累计 {r['total']} 件")
+    with t2:
+        with st.form("arrival"):
+            pick = st.selectbox("商品", list(labels.keys()), index=idx, key="a_sku")
+            qty = st.number_input("实收数量", 0, 999, 30)
+            if st.form_submit_button("确认到货", width="stretch"):
+                r = api.record_arrival(labels[pick], int(qty))
+                nm = pick.split()[1]
+                if r["diff"]:
+                    st.warning(f"{nm} 应到 {r['expected']}，实收 {qty}，差 {r['diff']:+d} 件")
+                else:
+                    st.success(f"{nm} 到货 {qty} 件")
+    with t3:
+        with st.form("waste"):
+            pick = st.selectbox("商品", list(labels.keys()), index=idx, key="w_sku")
+            qty = st.number_input("报废件数", 1, 99, 2)
+            if st.form_submit_button("登记报损", width="stretch"):
+                api.record_waste(labels[pick], int(qty))
+                st.success(f"{pick.split()[1]} 报废 {qty} 件")
+    with t4:
+        with st.form("count"):
+            pick = st.selectbox("商品", list(labels.keys()), index=idx, key="c_sku")
+            real = st.number_input("实盘数量", 0, 999, 0)
+            if st.form_submit_button("按实盘调平", width="stretch"):
+                r = api.record_count(labels[pick], int(real))
+                st.success(f"账面 {r['book']} → 实盘 {r['real']}，调整 {r['diff']:+d}")

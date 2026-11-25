@@ -40,8 +40,13 @@ HEAD = "编号,品名,分类,规格,来源,进价,售价,处理价,保质期,条
 class TestCatalog(Case):
     def test_template_is_parsable(self):
         p = api.catalog_read(api.catalog_template())
-        self.assertEqual(p["rows"][0][0], "烘焙01")
-        self.assertEqual(len(p["guess"]), 11)
+        checked = api.catalog_check(p["headers"], p["rows"])
+        self.assertEqual(checked["missing"], [])
+        self.assertEqual(checked["bad"], [])
+        n = self.conn.execute("SELECT COUNT(*) FROM sku").fetchone()[0]
+        self.assertEqual(len(checked["ok"]), n)
+        names = {r["name"] for r in checked["ok"]}
+        self.assertIn("牛奶", names)
 
     def test_rejects_bad_rows(self):
         checked = self.parse(HEAD, [

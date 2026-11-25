@@ -11,7 +11,7 @@ from pathlib import Path
 os.environ.setdefault("SHOP_DB_MODE", "file")
 
 ROOT = Path(__file__).resolve().parent.parent
-PAGES = ["1_今日", "2_订货", "3_记录", "4_复盘", "5_设置",
+PAGES = ["1_今日", "2_订货", "4_复盘", "5_设置",
          "6_看板", "7_收银", "8_标签", "9_导入"]
 
 

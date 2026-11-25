@@ -172,11 +172,23 @@ def commit(ok_rows):
 
 
 def template_csv():
+    """模板直接取库里的全部商品，店家改这个文件再导回来就是全量档案。"""
+    conn = connect()
+    rows = [dict(r) for r in conn.execute(
+        "SELECT sku_id, name, category, spec, source, cost, price, salvage, "
+        "shelf_life_days, barcode, supplier FROM sku ORDER BY category, sku_id")]
     buf = io.StringIO()
     w = csv.writer(buf)
     w.writerow(TEMPLATE_HEAD.split(","))
-    w.writerow(["烘焙01", "吐司", "烘焙", "原味", "自制", "5.90", "11.80", "2.40", "1", "SH201", ""])
-    w.writerow(["烘焙02", "牛角包", "烘焙", "黄油", "自制", "6.10", "12.20", "2.50", "1", "SH202", ""])
-    w.writerow(["饮品01", "美式", "饮品", "中杯", "自制", "3.00", "9.30", "0", "1", "SH301", ""])
-    w.writerow(["日配01", "牛奶", "日配", "950ml", "进货", "3.50", "6.20", "1.20", "3", "SH101", "日配供应商"])
+    if rows:
+        for r in rows:
+            w.writerow([r["sku_id"], r["name"], r["category"], r["spec"] or "",
+                        r["source"], f"{r['cost']:.2f}", f"{r['price']:.2f}",
+                        f"{r['salvage']:.2f}", r["shelf_life_days"],
+                        r["barcode"] or "", r["supplier"] or ""])
+    else:
+        w.writerow(["日配01", "牛奶", "日配", "950ml", "进货", "3.50", "6.20",
+                    "1.20", "3", "SH101", "日配供应商"])
+        w.writerow(["烘焙01", "吐司", "烘焙", "原味", "自制", "5.90", "11.80",
+                    "2.40", "1", "SH201", ""])
     return ("\ufeff" + buf.getvalue()).encode("utf-8")
