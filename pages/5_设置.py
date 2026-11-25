@@ -22,7 +22,8 @@ st.caption("来源决定这件商品进「进货单」还是「自制排产单�
 
 rows = api.sku_rows(user["role"])
 view = [{"编号": r["sku_id"], "品名": r["name"], "分类": r["category"],
-         "规格": r["spec"] or "", "来源": r["source"], "售价": float(r["price"])}
+         "规格": r["spec"] or "", "来源": r["source"],
+         "供货商": r.get("supplier") or "", "售价": float(r["price"])}
         for r in rows]
 if owner:
     for v, r in zip(view, rows):
@@ -54,11 +55,14 @@ with st.form("edit_sku"):
     cost = c4.number_input("进价", 0.01, 999.0, float(cur["cost"]), 0.01, format="%.2f")
     price = c5.number_input("售价", 0.01, 999.0, float(cur["price"]), 0.01, format="%.2f")
     salv = c6.number_input("处理价", 0.0, 999.0, float(cur["salvage"]), 0.01, format="%.2f")
+    supplier = st.text_input("供货商（进货类填，自制留空）",
+                             value=cur.get("supplier") or "",
+                             help="进货单会按供货商分组，方便分别发给各家")
 
     if st.form_submit_button("保存", type="primary"):
         try:
             api.update_sku(cur["sku_id"], cost, price, salv, int(shelf))
-            api.set_sku_meta(cur["sku_id"], source, spec)
+            api.set_sku_meta(cur["sku_id"], source, spec, supplier)
             st.success(f"{cur['name']} 已保存")
         except ValueError as e:
             st.error(f"未保存：{e}")

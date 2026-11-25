@@ -37,12 +37,11 @@ class Case(unittest.TestCase):
 
 HEAD = "编号,品名,分类,规格,来源,进价,售价,处理价,保质期,条码"
 
-
 class TestCatalog(Case):
     def test_template_is_parsable(self):
         p = api.catalog_read(api.catalog_template())
         self.assertEqual(p["rows"][0][0], "烘焙01")
-        self.assertEqual(len(p["guess"]), 10)
+        self.assertEqual(len(p["guess"]), 11)
 
     def test_rejects_bad_rows(self):
         checked = self.parse(HEAD, [
@@ -94,6 +93,36 @@ class TestCatalog(Case):
         n = self.conn.execute(
             "SELECT COUNT(*) FROM sku WHERE barcode=?", (row["barcode"],)).fetchone()[0]
         self.assertEqual(n, 1)
+
+
+class TestOrder(Case):
+    def test_grouped_by_supplier(self):
+        data = api.order_list()
+        names = {b["supplier"] for b in data["by_supplier"]}
+        self.assertEqual(names, {"日配供应商", "鲜食供应商"})
+        self.assertEqual(sum(b["kinds"] for b in data["by_supplier"]),
+                         data["summary"]["purchase_kinds"])
+        self.assertEqual(data["summary"]["suppliers"], 2)
+
+    def test_csv_blocks_and_single(self):
+        full = api.order_csv("purchase").decode("utf-8-sig")
+        self.assertIn("供货商：日配供应商", full)
+        self.assertIn("供货商：鲜食供应商", full)
+        self.assertIn("合计", full)
+
+        one = api.order_csv("purchase", supplier="日配供应商").decode("utf-8-sig")
+        self.assertIn("供货商：日配供应商", one)
+        self.assertNotIn("鲜食供应商", one)
+        self.assertNotIn("合计", one)
+
+    def test_catalog_supplier_column(self):
+        head = "编号,品名,分类,规格,来源,进价,售价,处理价,保质期,条码,供货商"
+        checked = self.parse(head, ["日配09,测试奶,日配,950ml,进货,3,6,1,3,SH109,晨光"])
+        self.assertEqual(checked["ok"][0]["supplier"], "晨光")
+        api.catalog_commit(checked["ok"])
+        row = self.conn.execute(
+            "SELECT supplier FROM sku WHERE sku_id='日配09'").fetchone()
+        self.assertEqual(row["supplier"], "晨光")
 
 
 if __name__ == "__main__":

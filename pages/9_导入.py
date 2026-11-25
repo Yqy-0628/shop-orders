@@ -24,11 +24,12 @@ def catalog_block():
         st.download_button("下载模板", api.catalog_template(), "商品档案模板.csv",
                            "text/csv", width="stretch")
     with c2:
-        st.caption("表头固定为：编号,品名,分类,规格,来源,进价,售价,处理价,保质期,条码")
+        st.caption("表头固定为：编号,品名,分类,规格,来源,进价,售价,处理价,保质期,条码,供货商"
+                   "（供货商只填进货类）")
 
     up = st.file_uploader("上传商品档案 CSV", type=["csv", "txt"], key="sku_up")
     pasted = st.text_area("或粘贴表格内容", height=100, key="sku_paste",
-                          placeholder="编号,品名,分类,规格,来源,进价,售价,处理价,保质期",
+                          placeholder="编号,品名,分类,规格,来源,进价,售价,处理价,保质期,条码,供货商",
                           label_visibility="collapsed")
     raw = up.read() if up is not None else (pasted.encode("utf-8") if pasted.strip() else None)
     if not raw:
@@ -61,7 +62,8 @@ def catalog_block():
         st.dataframe(
             [{"编号": r["sku_id"], "品名": r["name"], "分类": r["category"],
               "规格": r["spec"] or "—", "来源": r["source"], "进价": r["cost"],
-              "售价": r["price"], "处理价": r["salvage"], "保质期": r["shelf"]}
+              "售价": r["price"], "处理价": r["salvage"], "保质期": r["shelf"],
+              "供货商": r["supplier"] or "—"}
              for r in checked["ok"][:30]], width="stretch", hide_index=True)
 
     if st.button("写入商品档案", type="primary", disabled=not checked["ok"], key="sku_commit"):

@@ -24,8 +24,8 @@ def _today(d=None) -> str:
 
 def _skus(conn):
     return [dict(r) for r in conn.execute(
-        "SELECT sku_id, name, category, cost, price, salvage, mu, sigma, "
-        "shelf_life_days, source, spec FROM sku ORDER BY sku_id")]
+        "SELECT sku_id, barcode, name, category, cost, price, salvage, mu, sigma, "
+        "shelf_life_days, source, spec, supplier FROM sku ORDER BY sku_id")]
 
 
 # ---------------------------------------------------------------- 数据异常
@@ -286,11 +286,11 @@ def auto_lines(day: str | None = None) -> list[dict]:
 
 # ---------------------------------------------------------------- 订货清单
 def order_list(day: str | None = None) -> dict:
-    """明天的备货清单，按「进货」「自制」分开。
+    """明天的备货清单，按「进货」「自制」分开，进货再按供货商分组。
 
     进货的发给供货商，自制的交给后厨排产。系统不下单，只给量。
-    返回 {"day", "purchase": [...], "make": [...], "summary"}，
-    每项 {sku_id, name, category, spec, qty, price}
+    返回 {"day", "purchase", "make", "by_supplier", "summary"}，
+    每项 {sku_id, name, category, spec, qty, price, supplier}
     """
     day = _today(day)
     conn = connect()
@@ -302,30 +302,64 @@ def order_list(day: str | None = None) -> dict:
         except Exception:
             q = int(round(float(s["mu"] or 0)))
         item = {"sku_id": s["sku_id"], "name": s["name"], "category": s["category"],
-                "spec": s["spec"] or "", "qty": q, "price": float(s["price"])}
-        out["purchase" if s["source"] == "进货" else "make"].append(item)
+                "spec": s["spec"] or "", "qty": q, "price": float(s["price"]),
+                "supplier": (s.get("supplier") or "").strip()}
+        if s["source"] == "进货":
+            item["supplier"] = item["supplier"] or "未指定供货商"
+            out["purchase"].append(item)
+        else:
+            out["make"].append(item)
+
+    groups = {}
+    for x in out["purchase"]:
+        groups.setdefault(x["supplier"], []).append(x)
+    out["by_supplier"] = [
+        {"supplier": k, "kinds": len(v), "qty": sum(i["qty"] for i in v), "items": v}
+        for k, v in sorted(groups.items(), key=lambda kv: -sum(i["qty"] for i in kv[1]))
+    ]
     out["summary"] = {
         "purchase_kinds": len(out["purchase"]), "purchase_qty": sum(x["qty"] for x in out["purchase"]),
         "make_kinds": len(out["make"]), "make_qty": sum(x["qty"] for x in out["make"]),
+        "suppliers": len(out["by_supplier"]),
     }
     return out
 
 
-def order_csv(kind: str = "purchase", day: str | None = None) -> bytes:
-    """把清单导成 CSV，店长直接发给供货商或后厨。"""
+def order_csv(kind: str = "purchase", day: str | None = None,
+              supplier: str | None = None) -> bytes:
+    """把清单导成 CSV，店长直接发给供货商或后厨。
+
+    进货单默认按供货商分块，一块一张单；指定 supplier 时只出这一家的单。
+    """
     import csv
     import io
 
     data = order_list(day)
-    rows = data["purchase"] if kind == "purchase" else data["make"]
     buf = io.StringIO()
     w = csv.writer(buf)
-    title = "进货单" if kind == "purchase" else "自制排产单"
-    w.writerow([title, data["day"]])
-    w.writerow(["品名", "规格", "数量", "单位"])
-    for x in rows:
-        w.writerow([x["name"], x["spec"] or "-", x["qty"], "件"])
-    w.writerow(["合计", "", sum(x["qty"] for x in rows), "件"])
+    if kind == "make":
+        rows = data["make"]
+        w.writerow(["自制排产单", data["day"]])
+        w.writerow(["品名", "规格", "数量", "单位"])
+        for x in rows:
+            w.writerow([x["name"], x["spec"] or "-", x["qty"], "件"])
+        w.writerow(["合计", "", sum(x["qty"] for x in rows), "件"])
+        return ("\ufeff" + buf.getvalue()).encode("utf-8")
+
+    blocks = data["by_supplier"]
+    if supplier:
+        blocks = [b for b in blocks if b["supplier"] == supplier]
+    w.writerow(["进货单", data["day"], f"共 {sum(b['kinds'] for b in blocks)} 款"])
+    for b in blocks:
+        w.writerow([])
+        w.writerow([f"供货商：{b['supplier']}"])
+        w.writerow(["品名", "规格", "数量", "单位"])
+        for x in b["items"]:
+            w.writerow([x["name"], x["spec"] or "-", x["qty"], "件"])
+        w.writerow(["小计", "", b["qty"], "件"])
+    if not supplier:
+        w.writerow([])
+        w.writerow(["合计", "", sum(x["qty"] for x in data["purchase"]), "件"])
     return ("\ufeff" + buf.getvalue()).encode("utf-8")
 
 
@@ -388,7 +422,7 @@ def sku_rows(role: str = "owner") -> list[dict]:
     conn = connect()
     rows = [dict(r) for r in conn.execute(
         "SELECT sku_id, barcode, name, category, cost, price, salvage, "
-        "shelf_life_days, mu, source, spec FROM sku ORDER BY category, sku_id")]
+        "shelf_life_days, mu, source, spec, supplier FROM sku ORDER BY category, sku_id")]
     if role != "owner":
         for r in rows:
             r.pop("cost", None)
@@ -398,8 +432,8 @@ def sku_rows(role: str = "owner") -> list[dict]:
 
 
 def set_sku_meta(sku_id: str, source: str | None = None,
-                 spec: str | None = None) -> dict:
-    """改商品的来源（自制/进货）与规格备注，决定它进哪张清单。"""
+                 spec: str | None = None, supplier: str | None = None) -> dict:
+    """改商品的来源（自制/进货）、规格备注与供货商，决定它进哪张清单。"""
     conn = connect()
     if conn.execute("SELECT 1 FROM sku WHERE sku_id=?", (sku_id,)).fetchone() is None:
         raise KeyError(f"没有这个商品: {sku_id}")
@@ -409,6 +443,9 @@ def set_sku_meta(sku_id: str, source: str | None = None,
         conn.execute("UPDATE sku SET source=? WHERE sku_id=?", (source, sku_id))
     if spec is not None:
         conn.execute("UPDATE sku SET spec=? WHERE sku_id=?", (spec.strip() or None, sku_id))
+    if supplier is not None:
+        conn.execute("UPDATE sku SET supplier=? WHERE sku_id=?",
+                     (supplier.strip() or None, sku_id))
     conn.commit()
     return {"ok": True, "sku_id": sku_id}
 

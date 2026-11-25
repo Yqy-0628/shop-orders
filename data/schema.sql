@@ -19,7 +19,8 @@ CREATE TABLE sku (
   mu              REAL NOT NULL,
   sigma           REAL NOT NULL,
   source          TEXT NOT NULL DEFAULT '自制',  -- 自制 / 进货：决定进订货清单还是备料清单
-  spec            TEXT                          -- 口味、规格等细分描述，可空
+  spec            TEXT,                         -- 口味、规格等细分描述，可空
+  supplier        TEXT                          -- 进货类的供货商，下单时按它分组
 );
 
 CREATE TABLE sales (

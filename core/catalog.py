@@ -23,10 +23,11 @@ ALIAS = {
     "salvage": ("处理价", "残值", "salvage"),
     "shelf": ("保质期", "保质天数", "shelf_life_days"),
     "barcode": ("条码", "短码", "条形码", "barcode"),
+    "supplier": ("供货商", "供应商", "供应商名称", "supplier"),
 }
 
 REQUIRED = ("sku_id", "name", "category", "cost", "price", "shelf")
-TEMPLATE_HEAD = "编号,品名,分类,规格,来源,进价,售价,处理价,保质期,条码"
+TEMPLATE_HEAD = "编号,品名,分类,规格,来源,进价,售价,处理价,保质期,条码,供货商"
 
 
 def _norm(s: str) -> str:
@@ -104,7 +105,8 @@ def check(headers, rows, mapping):
             ok.append({"sku_id": sku_id, "name": name, "category": category,
                        "spec": rec.get("spec") or "", "source": source,
                        "cost": cost, "price": price, "salvage": salvage,
-                       "shelf": shelf, "barcode": (rec.get("barcode") or "").upper()})
+                       "shelf": shelf, "barcode": (rec.get("barcode") or "").upper(),
+                       "supplier": (rec.get("supplier") or "").strip()})
             seen.add(sku_id)
         except Exception as e:
             bad.append({"line": i, "reason": str(e), "raw": raw})
@@ -146,6 +148,10 @@ def commit(ok_rows):
                 "shelf_life_days=?, source=?, spec=? WHERE sku_id=?",
                 (r["name"], r["category"], r["cost"], r["price"], r["salvage"],
                  r["shelf"], r["source"], r["spec"] or None, r["sku_id"]))
+            # 供货商留空表示"沿用原值"，免得一次导入把已填的抹掉
+            if r.get("supplier"):
+                conn.execute("UPDATE sku SET supplier=? WHERE sku_id=?",
+                             (r["supplier"], r["sku_id"]))
             updated += 1
         else:
             barcode = r["barcode"]
@@ -154,10 +160,11 @@ def commit(ok_rows):
             taken.add(barcode)
             conn.execute(
                 "INSERT INTO sku (sku_id, barcode, name, category, cost, price, salvage, "
-                "shelf_life_days, mu, sigma, source, spec) "
-                "VALUES (?,?,?,?,?,?,?,?,0,0,?,?)",
+                "shelf_life_days, mu, sigma, source, spec, supplier) "
+                "VALUES (?,?,?,?,?,?,?,?,0,0,?,?,?)",
                 (r["sku_id"], barcode, r["name"], r["category"], r["cost"], r["price"],
-                 r["salvage"], r["shelf"], r["source"], r["spec"] or None))
+                 r["salvage"], r["shelf"], r["source"], r["spec"] or None,
+                 r.get("supplier") or None))
             created += 1
     conn.commit()
     return {"ok": True, "created": created, "updated": updated,
@@ -168,7 +175,8 @@ def template_csv():
     buf = io.StringIO()
     w = csv.writer(buf)
     w.writerow(TEMPLATE_HEAD.split(","))
-    w.writerow(["烘焙01", "吐司", "烘焙", "原味", "自制", "5.90", "11.80", "2.40", "1", "SH201"])
-    w.writerow(["烘焙02", "牛角包", "烘焙", "黄油", "自制", "6.10", "12.20", "2.50", "1", "SH202"])
-    w.writerow(["饮品01", "美式", "饮品", "中杯", "自制", "3.00", "9.30", "0", "1", "SH301"])
+    w.writerow(["烘焙01", "吐司", "烘焙", "原味", "自制", "5.90", "11.80", "2.40", "1", "SH201", ""])
+    w.writerow(["烘焙02", "牛角包", "烘焙", "黄油", "自制", "6.10", "12.20", "2.50", "1", "SH202", ""])
+    w.writerow(["饮品01", "美式", "饮品", "中杯", "自制", "3.00", "9.30", "0", "1", "SH301", ""])
+    w.writerow(["日配01", "牛奶", "日配", "950ml", "进货", "3.50", "6.20", "1.20", "3", "SH101", "日配供应商"])
     return ("\ufeff" + buf.getvalue()).encode("utf-8")

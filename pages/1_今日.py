@@ -75,12 +75,25 @@ t1, t2 = st.tabs([f"需进货 {lines['summary']['purchase_kinds']} 款 · "
                   f"自制 {lines['summary']['make_kinds']} 款 · "
                   f"{lines['summary']['make_qty']} 件"])
 with t1:
-    st.dataframe(
-        [{"品名": x["name"], "规格": x["spec"] or "—", "建议量": x["qty"]}
-         for x in lines["purchase"]],
-        width="stretch", hide_index=True)
-    st.download_button("导出进货单（CSV）", order_csv("purchase"),
-                       f"进货单_{lines['day']}.csv", "text/csv")
+    c1, c2 = st.columns([3, 1])
+    with c1:
+        st.caption(f"按 {lines['summary']['suppliers']} 家供货商分组，每块可直接发给对应一家")
+    with c2:
+        st.download_button("全部进货单", order_csv("purchase"),
+                           f"进货单_{lines['day']}.csv", "text/csv", width="stretch")
+
+    for g in lines["by_supplier"]:
+        with st.container(border=True):
+            h1, h2 = st.columns([4, 1])
+            h1.markdown(f"**{g['supplier']}**　{g['kinds']} 款 · {g['qty']} 件")
+            h2.download_button(
+                "导出", order_csv("purchase", supplier=g["supplier"]),
+                f"进货单_{g['supplier']}_{lines['day']}.csv", "text/csv",
+                key=f"dl_{g['supplier']}", width="stretch")
+            st.dataframe(
+                [{"品名": x["name"], "规格": x["spec"] or "—", "建议量": x["qty"]}
+                 for x in g["items"]],
+                width="stretch", hide_index=True)
 with t2:
     st.dataframe(
         [{"品名": x["name"], "规格": x["spec"] or "—", "建议量": x["qty"]}
