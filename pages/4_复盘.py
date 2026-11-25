@@ -30,21 +30,44 @@ else:
 
 st.divider()
 
-sb = scoreboard(30)
-st.subheader(f"近 {sb['days']} 天代价对比")
-if sb["days"]:
+value_csv = Path(__file__).resolve().parent.parent / "docs" / "value_eval.csv"
+if value_csv.exists():
+    import pandas as pd
+    frame = pd.read_csv(value_csv)
+    a = frame[frame["策略"] == "老板实际"].iloc[0]
+    b = frame[frame["策略"] == "系统建议"].iloc[0]
+    st.subheader(f"近 {int(a['天数'])} 天代价对比")
     c1, c2, c3 = st.columns(3)
-    c1.metric("实际代价", f"¥{sb['money_actual']:,.0f}")
-    c2.metric("按建议代价", f"¥{sb['money_model']:,.0f}")
-    c3.metric("差额", f"¥{sb['money_saved']:,.0f}",
-              delta=f"{sb['money_saved']/max(sb['money_actual'],1)*100:.0f}%")
-    d1, d2 = st.columns(2)
-    d1.metric("报废件数", f"{sb['model']['waste']:.0f}",
-              delta=f"{sb['model']['waste']-sb['actual']['waste']:+.0f}")
-    d2.metric("缺货天数", f"{sb['model']['stockout_days']}",
-              delta=f"{sb['model']['stockout_days']-sb['actual']['stockout_days']:+d} 天")
+    c1.metric("实际代价", f"¥{a['总代价']:,.0f}")
+    c2.metric("按建议代价", f"¥{b['总代价']:,.0f}")
+    saved = a["总代价"] - b["总代价"]
+    c3.metric("差额", f"¥{saved:,.0f}",
+              delta=f"{saved / max(a['总代价'], 1) * 100:.0f}%")
+    d1, d2, d3 = st.columns(3)
+    d1.metric("缺货件数", f"{b['缺货件数']:,.0f}",
+              delta=f"{b['缺货件数'] - a['缺货件数']:+,.0f}")
+    d2.metric("缺货天数", f"{b['缺货天数']:,.0f}",
+              delta=f"{b['缺货天数'] - a['缺货天数']:+,.0f} 天")
+    d3.metric("报废件数", f"{b['报废件数']:,.0f}",
+              delta=f"{b['报废件数'] - a['报废件数']:+,.0f}")
+    st.caption(f"{int(a['天数'])} 天 × {int(a['单品'])} 单品，按仿真真值重算。"
+               "系统为压缺货而多备货，报废件数上升，但缺货损失下降更多，总代价更低。")
 else:
-    st.info("数据不足，满两周后再看")
+    sb = scoreboard(28)
+    st.subheader(f"近 {sb['days']} 天代价对比")
+    if sb["days"]:
+        c1, c2, c3 = st.columns(3)
+        c1.metric("实际代价", f"¥{sb['money_actual']:,.0f}")
+        c2.metric("按建议代价", f"¥{sb['money_model']:,.0f}")
+        c3.metric("差额", f"¥{sb['money_saved']:,.0f}",
+                  delta=f"{sb['money_saved']/max(sb['money_actual'],1)*100:.0f}%")
+        d1, d2 = st.columns(2)
+        d1.metric("报废件数", f"{sb['model']['waste']:.0f}",
+                  delta=f"{sb['model']['waste']-sb['actual']['waste']:+.0f}")
+        d2.metric("缺货天数", f"{sb['model']['stockout_days']}",
+                  delta=f"{sb['model']['stockout_days']-sb['actual']['stockout_days']:+d} 天")
+    else:
+        st.info("数据不足，满两周后再看")
 
 st.divider()
 

@@ -176,6 +176,21 @@ def main():
     print(f"报告口径参考：省下的钱 ÷ 老板总代价 = "
           f"{(tot['A'] - tot['B']) / tot['A'] * 100:.1f}%")
 
+    # 落盘给页面用，保证界面与文档同一口径
+    days = len(mdd.DAYS) - start
+    out = []
+    for k, label in (("A", "老板实际"), ("B", "系统建议"), ("C", "朴素均值")):
+        out.append({"策略": label, "总代价": round(tot[k], 2),
+                    "报废件数": acc[k]["waste_units"],
+                    "报废成本": round(acc[k]["waste_cost"], 2),
+                    "缺货件数": acc[k]["short_units"],
+                    "缺货成本": round(acc[k]["short_cost"], 2),
+                    "缺货天数": acc[k]["short_days"],
+                    "天数": days, "单品": len(mdd.SKUS)})
+    pd.DataFrame(out).to_csv(ROOT / "docs" / "value_eval.csv",
+                             index=False, encoding="utf-8-sig")
+    print(f"已写入 docs/value_eval.csv（{days} 天 × {len(mdd.SKUS)} 单品）")
+
 
 if __name__ == "__main__":
     main()
