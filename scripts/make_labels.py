@@ -18,6 +18,8 @@ def main():
     ap.add_argument("--date", default=datetime.date.today().isoformat(),
                     help="生产日期 YYYY-MM-DD")
     ap.add_argument("--cats", default="", help="只看这些品类，逗号分隔")
+    ap.add_argument("--paper", default=labels.DEFAULT_PAPER,
+                    help="纸张预设，取值见 core/labels.py 的 PAPERS")
     args = ap.parse_args()
 
     made = datetime.date.fromisoformat(args.date)
@@ -39,12 +41,14 @@ def main():
                    "barcode": r["barcode"], "shelf": int(r["shelf_life_days"]),
                    "expire": expire.isoformat()} for _ in range(args.per)]
 
-    pdf = labels.to_pdf_bytes(items)
+    pdf = labels.to_pdf_bytes(items, args.paper)
     out = Path(args.out)
     out.parent.mkdir(parents=True, exist_ok=True)
     out.write_bytes(pdf)
-    pages = (len(items) + 23) // 24
-    print("items=%d pages=%d bytes=%d -> %s" % (len(items), pages, len(pdf), out))
+    per = labels.per_page(args.paper)
+    pages = (len(items) + per - 1) // per
+    print("items=%d pages=%d per_page=%d bytes=%d -> %s"
+          % (len(items), pages, per, len(pdf), out))
 
 
 if __name__ == "__main__":

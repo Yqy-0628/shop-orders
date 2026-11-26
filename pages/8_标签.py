@@ -24,9 +24,10 @@ if not labels.FONT_OK:
 
 
 @st.cache_data(show_spinner="正在生成 PDF")
-def render(items_json: str):
+def render(items_json: str, paper_name: str):
     items = json.loads(items_json)
-    return labels.to_png_bytes(items), labels.to_pdf_bytes(items)
+    return (labels.to_png_bytes(items, paper_name),
+            labels.to_pdf_bytes(items, paper_name))
 
 
 rows = api.sku_rows(user["role"])
@@ -35,9 +36,15 @@ if not rows:
     st.stop()
 
 cats = sorted({r["category"] for r in rows})
-c0, c1 = st.columns([2, 2])
+c0, c1, c2 = st.columns([2, 2, 2])
 sel = c0.multiselect("分类", cats, default=cats)
 made = c1.date_input("生产日期", value=datetime.date.today())
+paper_name = c2.selectbox("纸张", list(labels.PAPERS.keys()),
+                          index=list(labels.PAPERS).index(labels.DEFAULT_PAPER))
+cfg = labels.paper(paper_name)
+per = cfg["cols"] * cfg["rows"]
+st.caption(f"每枚 {cfg['cell_w']}×{cfg['cell_h']} 毫米，一页 {cfg['cols']}×{cfg['rows']}"
+           f"＝{per} 枚。换纸只改这里，版式比例自动跟着缩放。")
 
 last = api.label_plan()
 base = [r for r in rows if r["category"] in sel]
@@ -89,8 +96,8 @@ qty = edited["本次"].astype(int)
 total = int(qty.sum())
 kinds = int((qty > 0).sum())
 skip = len(edited) - kinds
-pages = max(1, (total + 23) // 24)
-st.caption(f"{kinds} 款 · {total} 枚　约 {pages} 页 A4（3 列 × 8 行，每枚 62 × 34 毫米）"
+pages = max(1, (total + per - 1) // per)
+st.caption(f"{kinds} 款 · {total} 枚　约 {pages} 页（每页 {per} 枚）"
            + (f"　另有 {skip} 款不打" if skip else ""))
 
 if st.button("生成标签", type="primary", disabled=total == 0):
@@ -106,7 +113,7 @@ if st.button("生成标签", type="primary", disabled=total == 0):
         items += [{"name": src["name"], "price": float(src["price"]),
                    "barcode": src["barcode"], "shelf": int(src["shelf_life_days"]),
                    "expire": expire.isoformat()} for _ in range(n)]
-    png, pdf = render(json.dumps(items, ensure_ascii=False))
+    png, pdf = render(json.dumps(items, ensure_ascii=False), paper_name)
     if png:
         st.image(png, caption="首页预览", width="stretch")
     if pdf:
