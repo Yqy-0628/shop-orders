@@ -135,6 +135,67 @@ def _next_barcode(conn, category):
     return f"{prefix}{n + 1:02d}"
 
 
+def next_sku_id(conn, category):
+    """按分类顺延编号：日配01 之后就是 日配02。"""
+    stem = category.strip()
+    n = 0
+    for (sid,) in conn.execute("SELECT sku_id FROM sku"):
+        if sid.startswith(stem) and sid[len(stem):].isdigit():
+            n = max(n, int(sid[len(stem):]))
+    return f"{stem}{n + 1:02d}"
+
+
+def add_one(name, category, cost, price, shelf, spec="", source="",
+            salvage=0.0, supplier="", barcode=""):
+    """手工上架一款新品：编号与条码都自动给，校验规则与批量导入一致。
+
+    返回 {"sku_id", "barcode"}。同名、同码、价格倒挂都会抛 ValueError。
+    """
+    conn = connect()
+    name = (name or "").strip()
+    category = (category or "").strip()
+    spec = (spec or "").strip()
+    if not name:
+        raise ValueError("品名不能为空")
+    if not category:
+        raise ValueError("分类不能为空")
+    if conn.execute("SELECT 1 FROM sku WHERE name=?", (name,)).fetchone():
+        raise ValueError(f"已有同名商品：{name}，请换个名字或直接改它的档案")
+
+    cost, price = float(cost), float(price)
+    salvage = float(salvage or 0)
+    shelf = int(shelf)
+    if cost <= 0 or price <= 0:
+        raise ValueError("进价与售价必须大于 0")
+    if price <= cost:
+        raise ValueError("售价必须高于进价")
+    if salvage < 0 or salvage >= cost:
+        raise ValueError("处理价必须不低于 0 且低于进价")
+    if not 1 <= shelf <= 7:
+        raise ValueError("保质期只支持 1 至 7 天")
+
+    src = _source(source, category)
+    if src is None:
+        raise ValueError("来源只能选「自制」或「进货」")
+
+    sku_id = next_sku_id(conn, category)
+    barcode = (barcode or "").strip().upper()
+    if barcode:
+        if conn.execute("SELECT 1 FROM sku WHERE barcode=?", (barcode,)).fetchone():
+            raise ValueError(f"条码 {barcode} 已被占用")
+    else:
+        barcode = _next_barcode(conn, category)
+
+    conn.execute(
+        "INSERT INTO sku (sku_id, barcode, name, category, cost, price, salvage, "
+        "shelf_life_days, mu, sigma, source, spec, supplier) "
+        "VALUES (?,?,?,?,?,?,?,?,0,0,?,?,?)",
+        (sku_id, barcode, name, category, cost, price, salvage, shelf,
+         src, spec or None, (supplier or "").strip() or None))
+    conn.commit()
+    return {"sku_id": sku_id, "barcode": barcode}
+
+
 def commit(ok_rows):
     """写库：已有编号更新档案（不动历史销量），新编号新增。返回新增/更新计数。"""
     conn = connect()

@@ -100,6 +100,31 @@ class TestCatalog(Case):
         self.assertEqual(n, 1)
 
 
+class TestAddOne(Case):
+    def test_add_auto_numbers_and_reject(self):
+        res = api.add_sku("海盐牛角包", "烘焙", 6, 13, 1, spec="海盐", source="自制")
+        self.assertTrue(res["sku_id"].startswith("烘焙"))
+        self.assertTrue(res["barcode"].startswith("SH2"))
+        row = self.conn.execute(
+            "SELECT name, mu, sigma, source, spec FROM sku WHERE sku_id=?",
+            (res["sku_id"],)).fetchone()
+        self.assertEqual(row["name"], "海盐牛角包")
+        self.assertEqual((row["mu"], row["sigma"]), (0, 0))
+        self.assertEqual((row["source"], row["spec"]), ("自制", "海盐"))
+
+        with self.assertRaises(ValueError):
+            api.add_sku("海盐牛角包", "烘焙", 6, 13, 1)      # 同名
+        with self.assertRaises(ValueError):
+            api.add_sku("倒挂款", "烘焙", 9, 8, 1)           # 售价低于进价
+        with self.assertRaises(ValueError):
+            api.add_sku("超期款", "烘焙", 6, 13, 9)          # 保质期超范围
+
+    def test_new_category_gets_id_and_code(self):
+        res = api.add_sku("冰乳酪", "冷藏", 8, 16, 3, source="进货", supplier="冷链")
+        self.assertEqual(res["sku_id"], "冷藏01")
+        self.assertTrue(res["barcode"].startswith("SH"))
+
+
 class TestOrder(Case):
     def test_grouped_by_supplier(self):
         data = api.order_list()

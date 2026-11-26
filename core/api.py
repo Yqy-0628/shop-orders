@@ -583,6 +583,15 @@ def catalog_commit(ok_rows: list) -> dict:
     return catalog.commit(ok_rows)
 
 
+def add_sku(name: str, category: str, cost: float, price: float, shelf: int,
+            spec: str = "", source: str = "", salvage: float = 0,
+            supplier: str = "", barcode: str = "") -> dict:
+    """手工上架一款新品，编号与条码自动生成。"""
+    return catalog.add_one(name, category, cost, price, shelf, spec=spec,
+                           source=source, salvage=salvage, supplier=supplier,
+                           barcode=barcode)
+
+
 # ---------------------------------------------------------------- 收工日报
 def day_close(day: str | None = None) -> dict:
     """一天的收工账：进多少、卖多少、报损多少、剩多少、几点卖光。

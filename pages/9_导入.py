@@ -15,6 +15,43 @@ ui.page("导入", "📥")
 user = ui.guard()
 
 st.title("数据导入")
+rows = api.sku_rows(user["role"])
+
+
+def add_block():
+    st.caption("只上一款新品时用这里，不用整表导入。编号与条码自动生成")
+    cats = sorted({r["category"] for r in rows})
+    with st.form("add_sku", clear_on_submit=True):
+        c1, c2, c3 = st.columns([2, 1.5, 1.8])
+        name = c1.text_input("品名", placeholder="海盐牛角包")
+        cat_sel = c2.selectbox("分类", cats + ["＋ 新分类"])
+        new_cat = c3.text_input("新分类名", placeholder="留空则用左边")
+        c4, c5, c6, c7 = st.columns(4)
+        cost = c4.number_input("进价", min_value=0.0, step=0.1, format="%.2f")
+        price = c5.number_input("售价", min_value=0.0, step=0.1, format="%.2f")
+        salvage = c6.number_input("处理价", min_value=0.0, step=0.1, format="%.2f",
+                                  help="卖不掉能回收的钱，没有就填 0")
+        shelf = c7.number_input("保质期（天）", min_value=1, max_value=7, value=1, step=1)
+        c8, c9, c10 = st.columns([1.3, 2, 2])
+        source = c8.radio("来源", ("自制", "进货"), horizontal=True)
+        spec = c9.text_input("规格/口味", placeholder="原味")
+        supplier = c10.text_input("供货商", placeholder="进货类才填")
+        go = st.form_submit_button("上架这一款", type="primary")
+
+    if not go:
+        return
+    category = new_cat.strip() or cat_sel
+    if category.startswith("＋"):
+        st.error("选了新分类，需要填分类名")
+        return
+    try:
+        res = api.add_sku(name, category, cost, price, int(shelf), spec=spec,
+                          source=source, salvage=salvage, supplier=supplier)
+    except ValueError as e:
+        st.error(str(e))
+        return
+    st.success(f"已上架「{name}」：编号 {res['sku_id']}，条码 {res['barcode']}")
+    st.caption("现在就能收银与打印标签；满 14 天有销量后进入订货建议。")
 
 
 def catalog_block():
@@ -169,7 +206,9 @@ def sale_block():
         st.success("该区间账目一致")
 
 
-t_sku, t_sale = st.tabs(["商品档案", "销售流水"])
+t_add, t_sku, t_sale = st.tabs(["单品上架", "商品档案", "销售流水"])
+with t_add:
+    add_block()
 with t_sku:
     catalog_block()
 with t_sale:
