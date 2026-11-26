@@ -18,7 +18,7 @@ st.title("设置")
 
 # ---------------------------------------------------------------- 商品档案
 st.subheader("商品档案")
-st.caption("来源决定这件商品进「进货单」还是「自制排产单」；售价用于收银，处理价用于报废折算")
+st.caption("来源决定进哪张单：自制进排产单，进货进进货单")
 
 rows = api.sku_rows(user["role"])
 view = [{"编号": r["sku_id"], "品名": r["name"], "分类": r["category"],
@@ -38,12 +38,22 @@ if not owner:
 
 st.divider()
 st.subheader("修改商品")
-st.caption("处理价指卖不掉时每件还能收回的钱（打折处理、退供应商）；直接扔掉填 0")
+st.caption("改一款商品的价、保质期与来源。处理价＝卖不掉时每件还能收回的钱，丢弃填 0")
 
-labels = [f"{r['sku_id']}　{r['name']}" + (f"（{r['spec']}）" if r["spec"] else "")
-          for r in rows]
-pick = st.selectbox("选择商品", labels)
-cur = rows[labels.index(pick)]
+kw = st.text_input("查找", placeholder="输入编号或名称，如 烘焙04 / 蛋挞",
+                   label_visibility="collapsed")
+pairs = [(f"{r['sku_id']}　{r['name']}" + (f"（{r['spec']}）" if r["spec"] else ""), r)
+         for r in rows]
+if kw.strip():
+    k = kw.strip().lower()
+    pairs = [(s, r) for s, r in pairs
+             if k in r["sku_id"].lower() or k in r["name"].lower()]
+if not pairs:
+    st.info("没有匹配的商品。")
+    st.stop()
+
+pick = st.selectbox("选择商品", [s for s, _ in pairs])
+cur = dict(next(r for s, r in pairs if s == pick))
 
 with st.form("edit_sku"):
     c1, c2, c3 = st.columns(3)
@@ -63,7 +73,7 @@ with st.form("edit_sku"):
         try:
             api.update_sku(cur["sku_id"], cost, price, salv, int(shelf))
             api.set_sku_meta(cur["sku_id"], source, spec, supplier)
-            st.success(f"{cur['name']} 已保存")
+            st.success(f"{cur['name']} 已保存，收银价与临界比即时生效")
         except ValueError as e:
             st.error(f"未保存：{e}")
 
@@ -81,6 +91,5 @@ with st.form("reset_clerk"):
         except ValueError as e:
             st.error(str(e))
 
-st.caption("店主可用页面：全部。店员可用页面：今日、订货（只读建议）、记录、收银、标签、设置。"
-           "店员看不到进价、毛利与代价金额，也不能下单或改档案。")
-st.caption("切换账号在侧栏点「切换账号」，回到登录页重新选身份。")
+st.caption("店主可用全部页面；店员可用今日、订货（只读）、收银、标签、设置（只读）。"
+           "切换身份在侧栏「切换账号」。")
