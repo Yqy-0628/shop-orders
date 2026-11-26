@@ -92,7 +92,8 @@ edited = st.data_editor(
     key=f"label_editor_{ver}",
 )
 
-qty = edited["本次"].astype(int)
+qty = pd.to_numeric(edited["本次"], errors="coerce").fillna(0).round().astype(int)
+edited = edited.assign(本次=qty)
 total = int(qty.sum())
 kinds = int((qty > 0).sum())
 skip = len(edited) - kinds
